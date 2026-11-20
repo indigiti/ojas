@@ -104,4 +104,7 @@ jq -e '.added==0 and .skipped>0' "$tmp/response"
 curl -fsS -b "$tmp/c2" "$url/export" | jq -e '.schedule==null and (.workouts|length>0) and .bodyweight[0].kg==71.8'
 advanced=$(jq '.targets.row += {group:"A",backup:"barbell-row"}' <<< "$routine_payload")
 curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d "$advanced" "$url/routines" | jq -e '.routine.targets.row.group=="A" and .routine.targets.row.backup=="barbell-row"'
+[[ $(curl -sS -o /dev/null -w '%{http_code}' "$url/photos") == 401 ]]
+[[ $(curl -sS -o /dev/null -w '%{http_code}' -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d '{"jpeg":"bad"}' "$url/photos") == 422 ]]
+curl -fsS -b "$tmp/c1" "$url/photos" | jq -e '.photos==[]'
 echo "API smoke checks passed"

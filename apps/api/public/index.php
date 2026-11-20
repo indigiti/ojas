@@ -10,10 +10,10 @@ function respond(int $status, array $result): never {
     echo json_encode($result, JSON_THROW_ON_ERROR);
     exit;
 }
-function body(): array {
+function body(int $limit=65536): array {
     if (strtolower(trim(explode(';',$_SERVER['CONTENT_TYPE'] ?? '')[0])) !== 'application/json') respond(415,['error'=>'JSON required']);
-    $raw=file_get_contents('php://input',false,null,0,65537);
-    if (strlen($raw)>65536) respond(413,['error'=>'Request too large']);
+    $raw=file_get_contents('php://input',false,null,0,$limit+1);
+    if (strlen($raw)>$limit) respond(413,['error'=>'Request too large']);
     try { $parsed=json_decode($raw,true,32,JSON_THROW_ON_ERROR); }
     catch (JsonException) { respond(400,['error'=>'Invalid JSON']); }
     if (!is_array($parsed)) respond(400,['error'=>'Invalid request']);
@@ -196,6 +196,42 @@ try {
                 'press'=>['sets'=>5,'reps'=>5,'restSeconds'=>180],
                 'deadlift'=>['sets'=>1,'reps'=>5,'restSeconds'=>180]]],
     ];
+    if ($path==='/photos' || preg_match('~^/photos/([a-f0-9]{32})$~D',$path,$photoMatch)) {
+        if ($isDemo) respond(403,['error'=>'Progress photos are disabled in the staging demo']);
+        $photoStore='photos_'.$user['id'];
+        if ($method==='GET' && $path==='/photos') {
+            $items=array_values(store($photoStore));
+            respond(200,['photos'=>array_map(static fn($p)=>['id'=>$p['id'],'createdAt'=>$p['createdAt']],array_reverse($items))]);
+        }
+        if ($method==='GET' && isset($photoMatch[1])) {
+            $photo=store($photoStore)[$photoMatch[1]] ?? null;
+            if (!$photo) respond(404,['error'=>'Photo not found']);
+            respond(200,['jpeg'=>$photo['jpeg']]);
+        }
+        if ($method==='DELETE' && isset($photoMatch[1])) {
+            store($photoStore,static function($items) use($photoMatch){
+                unset($items[$photoMatch[1]]);
+                return $items;
+            });
+            respond(200,['ok'=>true]);
+        }
+        if ($method==='POST' && $path==='/photos') {
+            $x=body(280000);
+            $jpeg=$x['jpeg'] ?? null;
+            $bytes=is_string($jpeg) ? base64_decode($jpeg,true) : false;
+            $info=$bytes!==false && strlen($bytes)<=196608 ? @getimagesizefromstring($bytes) : false;
+            if (!$info || $info[2]!==IMAGETYPE_JPEG || max($info[0],$info[1])>1024)
+                respond(422,['error'=>'Expected a JPEG up to 1,024 px and 192 KiB']);
+            $id=bin2hex(random_bytes(16));
+            $createdAt=gmdate(DATE_ATOM);
+            store($photoStore,static function($items) use($id,$createdAt,$bytes){
+                if (count($items)>=12) respond(422,['error'=>'Delete an older photo before adding another']);
+                $items[$id]=['id'=>$id,'createdAt'=>$createdAt,'jpeg'=>base64_encode($bytes)];
+                return $items;
+            });
+            respond(201,['id'=>$id,'createdAt'=>$createdAt]);
+        }
+    }
     if ($method==='PUT' && $path==='/bodyweight') {
         $x=body();
         $date=$x['date'] ?? null; $kg=$x['kg'] ?? null;

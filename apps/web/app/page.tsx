@@ -6,6 +6,7 @@ import { recordKey, isWeightRecord, volume, estimatedMax, platesPerSide, nextLoa
 import { ScheduleEditor, type Schedule } from "@/components/schedule-editor";
 import { ExerciseLibrary, type Exercise } from "@/components/exercise-library";
 import { MuscleMap } from "@/components/muscle-map";
+import { ProgressPhotos } from "@/components/progress-photos";
 import { Button } from "@/components/ui/button";
 
 type WeighIn={date:string;kg:number};
@@ -256,7 +257,7 @@ export default function Page(){
     </fieldset>)}
     <div className="flex gap-2"><Button disabled={busy||!online||!edit.exercises.length}>Save plan</Button><Button type="button" variant="ghost" disabled={busy} onClick={()=>Edit(null)}>Cancel</Button></div></form>}
   </div>}
-  {screen==="Progress"&&<div className="grid gap-4 sm:grid-cols-2"><section className={box}><h2 className="mb-4 text-xl font-black">Top set by session</h2><label className="grid gap-1">Exercise<select value={trend} onChange={e=>Trend(e.target.value)}>{Object.entries(catalog).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
+  {screen==="Progress"&&<div className="grid gap-4 sm:grid-cols-2">{session?.user&&!session.user.demo&&<ProgressPhotos key={session.user.id} request={api} csrf={session.csrf} online={online}/>}<section className={box}><h2 className="mb-4 text-xl font-black">Top set by session</h2><label className="grid gap-1">Exercise<select value={trend} onChange={e=>Trend(e.target.value)}>{Object.entries(catalog).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
    {bestEstimate>0&&<p className="mt-3 text-sm">Estimated 1RM: {bestEstimate.toFixed(1)} kg · Epley, 1–10 reps</p>}
    {personalBest&&<p className="mt-3 text-sm text-lime-300">Heaviest logged set: {personalBest.kg} kg × {personalBest.reps}</p>}
    {points.length?<ol className="mt-4 grid gap-3">{points.map(p=><li key={p.id}><div className="flex justify-between text-sm"><span>{fmt(p.date)}</span><span>{p.top.kg} kg × {p.top.reps}</span></div><div className="mt-1 h-2 rounded-full bg-neutral-700"><div aria-hidden className="h-2 rounded-full bg-lime-300" style={{width:(p.top.kg/max*100)+"%"}}/></div></li>)}</ol>:<p className="mt-4 text-neutral-400">No logged sets for this exercise.</p>}</section>
