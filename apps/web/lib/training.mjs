@@ -34,6 +34,21 @@ export function platesPerSide(total) {
 // Progression is advisory: never change a plan or logged load automatically.
 export function nextLoad(history, exercise, target) {
   if (!target) return null;
+  const sessions=history.map(w=>w.sets.filter(s=>s.exercise===exercise&&(!s.kind||s.kind==="work"))).filter(s=>s.length);
+  const recent=sessions[0];
+  if (!recent) return null;
+  const base=recent[0].kg;
+  if (base<=0 || recent.some(s=>s.kg!==base)) return base>0?{kg:base,reason:"Mixed working loads last time; review before increasing."}:null;
+  const belowBase=s=>s.length<target.sets||s.slice(0,target.sets).some(x=>x.reps<target.reps);
+  const n=target.deloadAfter;
+  if (n&&sessions.length>=n&&sessions.slice(0,n).every(s=>s.every(x=>x.kg===base)&&belowBase(s))) {
+    return {kg:Math.max(0.01,Math.round(base*90)/100),reps:target.reps,reason:"Repeated misses at this load. Consider a 10% deload."};
+  }
+  if(target.repCeiling&&!belowBase(recent)){
+    const lowest=Math.min(...recent.slice(0,target.sets).map(s=>s.reps));
+    if(lowest<target.repCeiling)return {kg:base,reps:lowest+1,reason:"Add a rep at the same load before increasing weight."};
+    return {kg:Math.min(1000,Math.round((base+2.5)*100)/100),reps:target.reps,reason:base>=1000?"Logged load is at the app limit.":"Upper rep target reached. Increase load and reset to the base reps."};
+  }
   for (const workout of history) {
     const sets=workout.sets.filter(s=>s.exercise===exercise && (!s.kind||s.kind==="work"));
     if (!sets.length) continue;

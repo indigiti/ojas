@@ -40,6 +40,16 @@ function routine(array $x, array $catalog): array {
         if (!is_int($sets) || $sets<1 || $sets>20 || !is_int($reps) || $reps<1 || $reps>300
             || !is_int($rest) || $rest<0 || $rest>900) respond(422,['error'=>'Targets must be 1–20 sets, 1–300 reps, and 0–900 seconds of rest']);
         $plan['targets'][$id]=['sets'=>$sets,'reps'=>$reps,'restSeconds'=>$rest];
+        if (isset($item['repCeiling'])) {
+            $top=$item['repCeiling'];
+            if (!is_int($top)||$top<=$reps||$top>300) respond(422,['error'=>'Upper rep target must exceed the base rep target']);
+            $plan['targets'][$id]['repCeiling']=$top;
+        }
+        if (isset($item['deloadAfter'])) {
+            $limit=$item['deloadAfter'];
+            if (!is_int($limit)||$limit<2||$limit>6) respond(422,['error'=>'Deload threshold must be 2–6 sessions']);
+            $plan['targets'][$id]['deloadAfter']=$limit;
+        }
         if (isset($item['group'])) {
             if (!is_string($item['group']) || !preg_match('/^[A-Z]$/D',$item['group'])) respond(422,['error'=>'Invalid superset letter']);
             $plan['targets'][$id]['group']=$item['group'];
