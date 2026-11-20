@@ -26,7 +26,22 @@ function routine(array $x, array $catalog): array {
         respond(422,['error'=>'Enter a plan name and 1–12 exercises']);
     foreach ($exercises as $e) if (!is_string($e) || !isset($catalog[$e])) respond(422,['error'=>'Unknown exercise']);
     if (count(array_unique($exercises)) !== count($exercises)) respond(422,['error'=>'Duplicate exercise']);
-    return ['name'=>$name,'exercises'=>$exercises];
+    $plan=['name'=>$name,'exercises'=>$exercises];
+    $targets=$x['targets'] ?? [];
+    if (!is_array($targets) || count($targets)>count($exercises)) respond(422,['error'=>'Invalid exercise targets']);
+    foreach ($targets as $id=>$target) {
+        if (!in_array($id,$exercises,true) || !is_array($target)) respond(422,['error'=>'Target must match a plan exercise']);
+    }
+    // Normalize by exercise order so reordered JSON keys do not affect retry fingerprints.
+    foreach ($exercises as $id) {
+        if (!isset($targets[$id])) continue;
+        $item=$targets[$id];
+        $sets=$item['sets'] ?? null; $reps=$item['reps'] ?? null; $rest=$item['restSeconds'] ?? null;
+        if (!is_int($sets) || $sets<1 || $sets>20 || !is_int($reps) || $reps<1 || $reps>300
+            || !is_int($rest) || $rest<0 || $rest>900) respond(422,['error'=>'Targets must be 1–20 sets, 1–300 reps, and 0–900 seconds of rest']);
+        $plan['targets'][$id]=['sets'=>$sets,'reps'=>$reps,'restSeconds'=>$rest];
+    }
+    return $plan;
 }
 function workout_sets(mixed $sets, array $plan): array {
         if (!is_array($sets) || !array_is_list($sets) || count($sets)<1 || count($sets)>120) respond(422,['error'=>'Log 1–120 sets']);
@@ -34,9 +49,37 @@ function workout_sets(mixed $sets, array $plan): array {
         foreach ($sets as $s) {
             if (!is_array($s)) respond(422,['error'=>'Invalid set']);
             $e=$s['exercise'] ?? null; $w=$s['kg'] ?? null; $n=$s['reps'] ?? null;
-            if (!in_array($e,$plan['exercises'],true) || !(is_int($w)||is_float($w)) || !is_finite($w) || $w<0 || $w>1000 || !is_int($n) || $n<1 || $n>300)
-                respond(422,['error'=>'Invalid exercise, weight or reps']);
-            $clean[]=['exercise'=>$e,'kg'=>(float)$w,'reps'=>$n];
+            $kind=$s['kind'] ?? 'work';
+            if (!in_array($e,$plan['exercises'],true) || !in_array($kind,['work','warmup','drop','timed','cardio'],true))
+                respond(422,['error'=>'Invalid exercise or set type']);
+            $time=in_array($kind,['timed','cardio'],true);
+            if (!(is_int($w)||is_float($w)) || !is_finite($w) || $w<0 || $w>1000 || !is_int($n) || $n<($time?0:1) || $n>300)
+                respond(422,['error'=>'Invalid weight or reps']);
+            $row=['exercise'=>$e,'kg'=>(float)$w,'reps'=>$n];
+            if ($kind!=='work') $row['kind']=$kind;
+            if ($time) {
+                $seconds=$s['seconds'] ?? null;
+                if (!is_int($seconds) || $seconds<1 || $seconds>86400 || $w!=0 || $n!==0)
+                    respond(422,['error'=>'Timed and cardio entries require 1–86,400 seconds and no load or reps']);
+                $row['seconds']=$seconds;
+                if ($kind==='cardio' && isset($s['km'])) {
+                    $km=$s['km'];
+                    if (!(is_int($km)||is_float($km)) || !is_finite($km) || $km<=0 || $km>1000) respond(422,['error'=>'Invalid cardio distance']);
+                    $row['km']=(float)$km;
+                }
+            }
+            foreach (['rpe'=>[1,10],'rir'=>[0,10],'restSeconds'=>[0,900]] as $field=>[$min,$max]) {
+                if (!isset($s[$field])) continue;
+                $value=$s[$field];
+                if (!is_int($value) || $value<$min || $value>$max) respond(422,['error'=>'Invalid '.$field]);
+                $row[$field]=$value;
+            }
+            if (isset($row['rpe'],$row['rir'])) respond(422,['error'=>'Enter RPE or RIR, not both']);
+            if (isset($s['group'])) {
+                if (!is_string($s['group']) || !preg_match('/^[A-Z]$/D',$s['group'])) respond(422,['error'=>'Use a single letter for a superset group']);
+                $row['group']=$s['group'];
+            }
+            $clean[]=$row;
         }
     return $clean;
 }
@@ -118,7 +161,7 @@ try {
         }
         return $data;
     };
-    // Templates are exercise lists; set prescriptions are not stored yet.
+    // Built-in templates remain usable without prescriptions.
     $starters=[
         ['id'=>'starter','name'=>'Full Body A','exercises'=>['squat','bench','row']],
         ['id'=>'starter-push','name'=>'Push','exercises'=>['bench','press','pushup']],
@@ -127,6 +170,52 @@ try {
         ['id'=>'starter-upper','name'=>'Upper Body','exercises'=>['bench','row','press','pulldown']],
         ['id'=>'starter-lower','name'=>'Lower Body','exercises'=>['squat','deadlift','split']],
     ];
+    if ($method==='PUT' && $path==='/bodyweight') {
+        $x=body();
+        $date=$x['date'] ?? null; $kg=$x['kg'] ?? null;
+        if (!is_string($date) || !preg_match('/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/D',$date,$parts)
+            || !checkdate((int)$parts[2],(int)$parts[3],(int)$parts[1]) || $date<'1900-01-01' || $date>gmdate('Y-m-d')
+            || !(is_int($kg)||is_float($kg)) || !is_finite($kg) || $kg<1 || $kg>1000)
+            respond(422,['error'=>'Use a valid UTC date and a weight between 1 and 1,000 kg']);
+        $d=$userStore(static function($d) use($date,$kg,$isDemo) {
+            $d['bodyweight'][$date]=['date'=>$date,'kg'=>round($kg,2)];
+            if (count($d['bodyweight'])>($isDemo?30:36600)) respond(422,['error'=>'Weigh-in limit reached']);
+            return $d;
+        });
+        respond(200,['entry'=>$d['bodyweight'][$date]]);
+    }
+    if ($method==='GET' && $path==='/export') {
+        $d=$userStore();
+        $workouts=array_values($d['workouts'] ?? []);
+        foreach ($workouts as &$workout) unset($workout['fingerprint'],$workout['rotation']);
+        unset($workout);
+        respond(200,['version'=>1,'exportedAt'=>gmdate(DATE_ATOM),'routines'=>array_values($d['routines'] ?? []),
+            'workouts'=>$workouts,'bodyweight'=>array_values($d['bodyweight'] ?? []),'schedule'=>$d['schedule'] ?? null]);
+    }
+    if ($method==='GET' && $path==='/schedule') {
+        respond(200,['schedule'=>$userStore()['schedule'] ?? null]);
+    }
+    if ($method==='PUT' && $path==='/schedule') {
+        $x=body();
+        $mode=$x['mode'] ?? null;
+        $slots=$x['slots'] ?? null;
+        if (!in_array($mode,['manual','weekly','rotation'],true) || !is_array($slots) || !array_is_list($slots)
+            || ($mode==='manual' && count($slots)!==0) || ($mode==='weekly' && count($slots)!==7)
+            || ($mode==='rotation' && (count($slots)<1 || count($slots)>12)))
+            respond(422,['error'=>'Invalid schedule']);
+        $d=$userStore(static function($d) use ($mode,$slots,$starters) {
+            $ids=array_merge(array_column($starters,'id'),array_keys($d['routines'] ?? []));
+            foreach ($slots as $slot) {
+                if ($slot===null && $mode==='weekly') continue;
+                if (!is_string($slot) || !in_array($slot,$ids,true)) respond(422,['error'=>'Choose an available routine']);
+            }
+            $previous=$d['schedule'] ?? null;
+            if (($previous['mode'] ?? null)===$mode && $previous['slots']===$slots) return $d;
+            $d['schedule']=['mode'=>$mode,'slots'=>$slots,'id'=>bin2hex(random_bytes(16)),'step'=>0];
+            return $d;
+        });
+        respond(200,['schedule'=>$d['schedule']]);
+    }
     if ($method==='GET' && $path==='/exercises') respond(200,['exercises'=>$catalog]);
     if ($method==='GET' && $path==='/routines') respond(200,['routines'=>array_merge($starters,array_values($userStore()['routines'] ?? []))]);
     if (($method==='POST' && $path==='/routines') || ($method==='PATCH' && preg_match('~^/routines/([a-f0-9]{32})$~D',$path,$match))) {
@@ -140,9 +229,10 @@ try {
         respond($method==='POST'?201:200,['routine'=>$new]);
     }
     if ($method==='GET' && in_array($path,['/workouts','/progress'],true)) {
-        $sessions=array_reverse(array_values($userStore()['workouts'] ?? []));
+        $d=$userStore();
+        $sessions=array_values($d['workouts'] ?? []);
         usort($sessions,static fn($a,$b)=>strcmp($b['finishedAt'],$a['finishedAt']));
-        respond(200,['workouts'=>$sessions]);
+        respond(200,['workouts'=>$sessions,'bodyweight'=>array_values($d['bodyweight'] ?? [])]);
     }
     if ($method==='PATCH' && preg_match('~^/workouts/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$~D',$path,$match)) {
         $id=$match[1];
@@ -172,6 +262,13 @@ try {
         $plan=is_array($x['plan'] ?? null) ? routine($x['plan'],$catalog) : routine([],$catalog);
         $clean=workout_sets($x['sets'] ?? null,$plan);
         $payload=['id'=>$id,'plan'=>$plan,'sets'=>$clean];
+        if (array_key_exists('rotation',$x)) {
+            $rotation=$x['rotation'];
+            if (!is_array($rotation) || !is_string($rotation['id'] ?? null) || !preg_match('/^[a-f0-9]{32}$/D',$rotation['id'])
+                || !is_int($rotation['step'] ?? null) || $rotation['step']<0
+                || !is_string($rotation['planId'] ?? null) || strlen($rotation['planId'])>32) respond(422,['error'=>'Invalid rotation reference']);
+            $payload['rotation']=['id'=>$rotation['id'],'step'=>$rotation['step'],'planId'=>$rotation['planId']];
+        }
         $fingerprint=hash('sha256',json_encode($payload,JSON_THROW_ON_ERROR|JSON_PRESERVE_ZERO_FRACTION));
         $status=201;
         $d=$userStore(function($d) use($id,$payload,$fingerprint,&$status) {
@@ -179,11 +276,17 @@ try {
                 if ($d['workouts'][$id]['fingerprint']!==$fingerprint) respond(409,['error'=>'This workout ID already has different sets']);
                 $status=200;
             } else {
+                $rotation=$payload['rotation'] ?? null;
+                $schedule=$d['schedule'] ?? null;
+                if ($rotation && ($schedule['mode'] ?? null)==='rotation' && $schedule['id']===$rotation['id']
+                    && $schedule['step']===$rotation['step'] && $schedule['slots'][$schedule['step'] % count($schedule['slots'])]===$rotation['planId']) {
+                    $d['schedule']['step']++;
+                }
                 $d['workouts'][$id]=$payload+['finishedAt'=>gmdate(DATE_ATOM),'fingerprint'=>$fingerprint];
             }
             return $d;
         });
-        respond($status,['workout'=>$d['workouts'][$id]]);
+        respond($status,['workout'=>$d['workouts'][$id],'schedule'=>$d['schedule'] ?? null]);
     }
     respond(404,['error'=>'Endpoint not found']);
 } catch (Throwable $e) {
