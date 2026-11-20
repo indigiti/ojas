@@ -1,0 +1,7 @@
+@import "tailwindcss";
+:root { color-scheme: dark; }
+body { background: #101111; color: #f3f5ef; font-family: system-ui, sans-serif; }
+input { min-width:0; }
+input:not([type=checkbox]), select { border: 1px solid #484c43; border-radius: .75rem; background: #141714; padding: .65rem .8rem; }
+input:focus-visible, select:focus-visible { outline: 2px solid #bef264; outline-offset: 2px; }
+::selection { background:#bef264; color:#111; }

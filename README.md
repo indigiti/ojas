@@ -1,6 +1,6 @@
 # OJAS — Workout Web App Blueprint
 
-**Status:** Proposed architecture and pilot scope. No application has been implemented or deployed.  
+**Status:** Staging pilot implementation on the development branch. See [deployment and test instructions](docs/STAGING.md).  
 **Product:** A mobile-first strength-training log for individual lifters. openGym informs the workflow; OJAS does not depend on its runtime, code, or exercise media.
 
 ## 1. Pilot scope
