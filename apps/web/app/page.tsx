@@ -6,6 +6,7 @@ import { recordKey, isWeightRecord, volume, estimatedMax, platesPerSide } from "
 import { ScheduleEditor, type Schedule } from "@/components/schedule-editor";
 import { Button } from "@/components/ui/button";
 
+type WeighIn={date:string;kg:number};
 type User = {id:string;email?:string;demo?:boolean};
 type Session = {user:User|null;csrf:string;demoAvailable?:boolean};
 type Target = {sets:number;reps:number;restSeconds:number};
@@ -47,12 +48,15 @@ export default function Page(){
  const [schedule,ScheduleState]=useState<Schedule|null>(null);
  const [override,Override]=useState(false);
  const [extras,Extras]=useState<Partial<Lift>>({});
+ const [weighIns,WeighIns]=useState<WeighIn[]>([]);
+ const [weighDate,WeighDate]=useState("");
+ const [weighKg,WeighKg]=useState("");
  const uid=session?.user?.id;
  const key="ojas:draft:"+uid;
  const title=(id:string)=>catalog[id]||id;
  async function refresh(){
-  const [c,p,h,s]=await Promise.all([api<{exercises:Record<string,string>}>("/exercises"),api<{routines:Plan[]}>("/routines"),api<{workouts:Workout[]}>("/progress"),api<{schedule:Schedule|null}>("/schedule")]);
-  ScheduleState(s.schedule);C(c.exercises);P(p.routines);H(h.workouts);Trend(t=>t||Object.keys(c.exercises)[0]||"");
+  const [c,p,h,s]=await Promise.all([api<{exercises:Record<string,string>}>("/exercises"),api<{routines:Plan[]}>("/routines"),api<{workouts:Workout[];bodyweight:WeighIn[]}>("/progress"),api<{schedule:Schedule|null}>("/schedule")]);
+  ScheduleState(s.schedule);C(c.exercises);P(p.routines);H(h.workouts);WeighIns(h.bodyweight??[]);Trend(t=>t||Object.keys(c.exercises)[0]||"");
  }
  useEffect(()=>{api<Session>("/me").then(S).catch(e=>N(err(e))).finally(()=>R(true));
   const check=()=>On(navigator.onLine);check();window.addEventListener("online",check);window.addEventListener("offline",check);
@@ -91,7 +95,7 @@ export default function Page(){
  function demo(){void action(async()=>{
   const s=await api<Session>("/me");S(await api<Session>("/auth/demo","POST",{},s.csrf));screenTo("Today");
  });}
- function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);if(session.user?.demo)void del(key).catch(()=>{});S(null);D(null);ScheduleState(null);Override(false);Correct(null);SetEditing(null);Removed(null);P([]);H([]);C({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
+ function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);if(session.user?.demo)void del(key).catch(()=>{});S(null);D(null);ScheduleState(null);Override(false);Correct(null);SetEditing(null);Removed(null);P([]);H([]);WeighIns([]);WeighKg("");WeighDate("");C({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
  function savePlan(e:FormEvent){e.preventDefault();if(!edit||!session)return;void action(async()=>{
   const {routine}=await api<{routine:Plan}>(edit.id?"/routines/"+edit.id:"/routines",edit.id?"PATCH":"POST",{...edit,targets:Object.fromEntries(edit.exercises.map(id=>[id,edit.targets?.[id]??defaultTarget]))},session.csrf);
   P(p=>p.some(x=>x.id===routine.id)?p.map(x=>x.id===routine.id?routine:x):[...p,routine]);Sel(routine.id);Edit(null);
@@ -119,6 +123,15 @@ export default function Page(){
  }
  const personalBest=history.flatMap(w=>w.sets).filter(s=>s.exercise===trend&&!timed(s)&&s.kind!=="warmup").sort((a,b)=>recordKey(b)-recordKey(a))[0];
  const bestEstimate=Math.max(0,...history.flatMap(w=>w.sets).filter(s=>s.exercise===trend&&s.kind!=="warmup").map(s=>estimatedMax(s)??0));
+ const orderedWeights=[...weighIns].sort((a,b)=>b.date.localeCompare(a.date));
+ const weightDate=weighDate||(now?new Date(now).toISOString().slice(0,10):"");
+ function saveWeight(e:FormEvent){
+  e.preventDefault();if(!session)return;
+  void action(async()=>{
+   const {entry}=await api<{entry:WeighIn}>("/bodyweight","PUT",{date:weightDate,kg:Number(weighKg)},session.csrf);
+   WeighIns(entries=>[...entries.filter(x=>x.date!==entry.date),entry]);WeighKg("");N("Weigh-in saved.");
+  });
+ }
  async function exportData(){
   await action(async()=>{const data=await api("/export");const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));
    const link=document.createElement("a");link.href=url;link.download="ojas-training.json";link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -201,7 +214,16 @@ export default function Page(){
    {bestEstimate>0&&<p className="mt-3 text-sm">Estimated 1RM: {bestEstimate.toFixed(1)} kg · Epley, 1–10 reps</p>}
    {personalBest&&<p className="mt-3 text-sm text-lime-300">Heaviest logged set: {personalBest.kg} kg × {personalBest.reps}</p>}
    {points.length?<ol className="mt-4 grid gap-3">{points.map(p=><li key={p.id}><div className="flex justify-between text-sm"><span>{fmt(p.date)}</span><span>{p.top.kg} kg × {p.top.reps}</span></div><div className="mt-1 h-2 rounded-full bg-neutral-700"><div aria-hidden className="h-2 rounded-full bg-lime-300" style={{width:(p.top.kg/max*100)+"%"}}/></div></li>)}</ol>:<p className="mt-4 text-neutral-400">No logged sets for this exercise.</p>}</section>
-   <section className={box}><h2 className="mb-4 text-xl font-black">Workout history</h2><Button className="mb-3" variant="outline" disabled={busy||!online} onClick={()=>void exportData()}>Export training JSON</Button>{history.length?history.map(w=><details key={w.id} className="border-b border-white/10 py-3"><summary className="cursor-pointer font-bold">{w.plan.name} · {fmt(w.finishedAt)} · {w.sets.length} sets</summary><ul className="mt-2 text-sm text-neutral-300">{w.sets.map((s,i)=><li key={i}>{title(s.exercise)} · {s.kg} kg × {s.reps}</li>)}</ul><Button variant="outline" className="mt-3" disabled={busy} onClick={()=>{Correct(w);WorkoutDate(w.finishedAt.slice(0,10));}}>Correct workout</Button></details>):<p className="text-neutral-400">No completed workouts.</p>}</section>
+   <section className={box}><h2 className="mb-4 text-xl font-black">Body weight</h2>
+   <form className="grid gap-3" onSubmit={saveWeight}>
+    <label className="grid gap-1">Date (UTC)<input type="date" required min="1900-01-01" max={now?new Date(now).toISOString().slice(0,10):undefined} value={weightDate} onChange={e=>WeighDate(e.target.value)}/></label>
+    <label className="grid gap-1">Weight (kg)<input type="number" inputMode="decimal" required min="1" max="1000" step="0.01" value={weighKg} onChange={e=>WeighKg(e.target.value)}/></label>
+    <p className="text-sm text-neutral-400">Saving the same date replaces that day’s entry.</p>
+    <Button disabled={busy||!online}>Save weigh-in</Button>
+   </form>
+   {orderedWeights.length>0&&<ul className="mt-4 divide-y divide-white/10">{orderedWeights.slice(0,14).map(x=><li className="flex justify-between py-2" key={x.date}><span>{fmt(x.date)}</span><span>{x.kg} kg</span></li>)}</ul>}
+   </section>
+   <section className={box}><h2 className="mb-4 text-xl font-black">Workout history</h2><Button className="mb-3" variant="outline" disabled={busy||!online} onClick={()=>void exportData()}>Export training JSON</Button>{history.length?history.map(w=><details key={w.id} className="border-b border-white/10 py-3"><summary className="cursor-pointer font-bold">{w.plan.name} · {fmt(w.finishedAt)} · {w.sets.length} sets</summary><ul className="mt-2 text-sm text-neutral-300">{w.sets.map((s,i)=><li key={i}>{title(s.exercise)} · {describe(s)}</li>)}</ul><Button variant="outline" className="mt-3" disabled={busy} onClick={()=>{Correct(w);WorkoutDate(w.finishedAt.slice(0,10));}}>Correct workout</Button></details>):<p className="text-neutral-400">No completed workouts.</p>}</section>
    {correction&&<form className={box+" grid gap-3 sm:col-span-2"} onSubmit={saveCorrection}>
     <h2 className="text-xl font-black">Correct {correction.plan.name}</h2>
     <label className="grid gap-1">Workout date (UTC)<input required type="date" min="1900-01-01" max={new Date().toISOString().slice(0,10)} value={workoutDate} onChange={e=>WorkoutDate(e.target.value)}/></label>

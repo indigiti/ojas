@@ -6,7 +6,7 @@ Source: DuarteSantos8/openGym README feature list and license. OJAS implements i
 |---|---|
 | Planning | Licensed exercise library and media, search and equipment filters, muscle maps, custom uploads, one-off weekly rescheduling and configurable week start, editable starter templates including 5×5, deloads |
 | Training | Per-set rest, supersets, warm-up/drop/rest-pause/pyramid sets, timed and cardio exercises, RPE/RIR, per-side reps, bodyweight and added load, gym equipment profiles and plate math, substitute exercises, wake lock/alerts, swipe actions and configurable views |
-| Progress | Manual entries, adding/removing sets in completed workouts, progression engines and deload logic, estimated 1RM, activity heatmap, structural balance and muscle recovery views, bodyweight and photos |
+| Progress | Manual entries, adding/removing sets in completed workouts, progression engines and deload logic, estimated 1RM, activity heatmap, structural balance and muscle recovery views, bodyweight goals and trend chart, progress photos |
 | Accounts and data | Passkeys and pairing, service worker/cold offline start, conflict-aware sync, import/export, plan sharing/printing, admin/audit, localization and RTL |
 | Coach and integrations | Model-backed FastAPI coach with explicit approvals, MCP, signed webhooks |
 | Native | iOS, iPadOS, Android, Apple Watch, Apple Health and Health Connect, notifications, geofenced reminders, widgets, Live Activities and supported heart-rate devices |
@@ -22,3 +22,5 @@ This draft adds exercise-level sets, reps and rests, a recurring weekly schedule
 ## Expanded training implementation in this draft
 
 Adds warm-up/drop tags, timed and cardio entries, RPE or RIR, per-set rest, manual superset grouping, a fixed 20 kg bar calculator, bounded Epley e1RM, and authenticated training JSON export. Manual groups do not automate superset sequencing. The plate calculation does not model a gym's inventory. Export is not import or backup restoration. These limited versions do not close the broader parity rows.
+
+Bodyweight: dated weigh-ins, same-date corrections, recent history and JSON export are implemented in this draft. A goal line, progress photos and a rate-of-change chart remain open.

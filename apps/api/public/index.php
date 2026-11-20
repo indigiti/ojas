@@ -170,13 +170,27 @@ try {
         ['id'=>'starter-upper','name'=>'Upper Body','exercises'=>['bench','row','press','pulldown']],
         ['id'=>'starter-lower','name'=>'Lower Body','exercises'=>['squat','deadlift','split']],
     ];
+    if ($method==='PUT' && $path==='/bodyweight') {
+        $x=body();
+        $date=$x['date'] ?? null; $kg=$x['kg'] ?? null;
+        if (!is_string($date) || !preg_match('/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/D',$date,$parts)
+            || !checkdate((int)$parts[2],(int)$parts[3],(int)$parts[1]) || $date<'1900-01-01' || $date>gmdate('Y-m-d')
+            || !(is_int($kg)||is_float($kg)) || !is_finite($kg) || $kg<1 || $kg>1000)
+            respond(422,['error'=>'Use a valid UTC date and a weight between 1 and 1,000 kg']);
+        $d=$userStore(static function($d) use($date,$kg,$isDemo) {
+            $d['bodyweight'][$date]=['date'=>$date,'kg'=>round($kg,2)];
+            if (count($d['bodyweight'])>($isDemo?30:36600)) respond(422,['error'=>'Weigh-in limit reached']);
+            return $d;
+        });
+        respond(200,['entry'=>$d['bodyweight'][$date]]);
+    }
     if ($method==='GET' && $path==='/export') {
         $d=$userStore();
         $workouts=array_values($d['workouts'] ?? []);
         foreach ($workouts as &$workout) unset($workout['fingerprint'],$workout['rotation']);
         unset($workout);
         respond(200,['version'=>1,'exportedAt'=>gmdate(DATE_ATOM),'routines'=>array_values($d['routines'] ?? []),
-            'workouts'=>$workouts,'schedule'=>$d['schedule'] ?? null]);
+            'workouts'=>$workouts,'bodyweight'=>array_values($d['bodyweight'] ?? []),'schedule'=>$d['schedule'] ?? null]);
     }
     if ($method==='GET' && $path==='/schedule') {
         respond(200,['schedule'=>$userStore()['schedule'] ?? null]);
@@ -215,9 +229,10 @@ try {
         respond($method==='POST'?201:200,['routine'=>$new]);
     }
     if ($method==='GET' && in_array($path,['/workouts','/progress'],true)) {
-        $sessions=array_reverse(array_values($userStore()['workouts'] ?? []));
+        $d=$userStore();
+        $sessions=array_values($d['workouts'] ?? []);
         usort($sessions,static fn($a,$b)=>strcmp($b['finishedAt'],$a['finishedAt']));
-        respond(200,['workouts'=>$sessions]);
+        respond(200,['workouts'=>$sessions,'bodyweight'=>array_values($d['bodyweight'] ?? [])]);
     }
     if ($method==='PATCH' && preg_match('~^/workouts/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$~D',$path,$match)) {
         $id=$match[1];

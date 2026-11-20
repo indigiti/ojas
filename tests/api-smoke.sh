@@ -78,4 +78,14 @@ jq -e '.workout.sets[0].restSeconds==0 and .workout.sets[1].km==0.5' "$tmp/respo
 [[ $(post "$(jq '.sets[1].seconds=0' <<< "$rich")") == 422 ]]
 curl -fsS -b "$tmp/c1" "$url/export" | jq -e '.version==1 and (.workouts | any(.sets | any(.kind=="cardio"))) and (.workouts | all(has("fingerprint")|not))'
 curl -fsS -b "$tmp/c2" "$url/export" | jq -e '.workouts==[] and .routines==[]'
+put_weight() {
+ curl -sS -o "$tmp/response" -w '%{http_code}' -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -X PUT -d "$1" "$url/bodyweight"
+}
+[[ $(put_weight '{"date":"2024-02-30","kg":72}') == 422 ]]
+[[ $(put_weight '{"date":"2024-02-29","kg":0}') == 422 ]]
+[[ $(put_weight '{"date":"2024-02-29","kg":72.1}') == 200 ]]
+[[ $(put_weight '{"date":"2024-02-29","kg":71.8}') == 200 ]]
+curl -fsS -b "$tmp/c1" "$url/progress" | jq -e '.bodyweight==[{date:"2024-02-29",kg:71.8}]'
+curl -fsS -b "$tmp/c1" "$url/export" | jq -e '.bodyweight[0].kg==71.8'
+curl -fsS -b "$tmp/c2" "$url/progress" | jq -e '.bodyweight==[]'
 echo "API smoke checks passed"
