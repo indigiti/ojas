@@ -5,7 +5,9 @@ test -f apps/web/out/index.html
 grep -Fq '/ojas/_next/' apps/web/out/index.html
 mkdir -p release/public release/private/build
 cp -a apps/web/out/. release/public/
-cp deploy/digiops/.htaccess deploy/digiops/ojas-api.php release/public/
+cp deploy/digiops/.htaccess release/public/
+mkdir -p release/public/api/v1
+cp deploy/digiops/ojas-api.php release/public/api/v1/index.php
 cp -a apps/api release/private/api
 cp docs/STAGING.md release/private/
 php <<'PHP'

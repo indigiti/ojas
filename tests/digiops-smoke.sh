@@ -25,6 +25,15 @@ curl -fsS "$base/api/v1/health" | jq -e '.ok == true'
 curl -fsS -D "$tmp/headers" "$base/api/v1/me" | jq -e '.user == null and (.csrf|length == 64)'
 grep -Eiq '^set-cookie: __Secure-ojas=.*path=/ojas/api/v1/.*secure.*HttpOnly' "$tmp/headers"
 test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/v1/progress")" = 401
-test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/ojas-api.php")" = 404
+test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/v1/index.php")" = 404
+curl -fsSI "$base/api/v1/health" >/dev/null
+# Prove the browser's direct PHP route works even without rewrite rules.
+rm "$tmp/public_html/ojas/.htaccess"
+curl -fsS "$base/api/v1/index.php?route=%2Fhealth" | jq -e '.ok == true'
+curl -fsSI "$base/api/v1/index.php?route=%2Fhealth" >/dev/null
+curl -fsS -D "$tmp/headers" "$base/api/v1/index.php?route=%2Fme" | jq -e '.user == null and (.csrf|length == 64)'
+grep -Eiq '^set-cookie: __Secure-ojas=.*path=/ojas/api/v1/.*secure.*HttpOnly' "$tmp/headers"
+test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/v1/index.php?route=%2Fprogress")" = 401
+test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/v1/index.php?route[]=health")" = 404
 test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/runtime/users.json")" = 404
 test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/storage.php")" = 404
