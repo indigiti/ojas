@@ -105,9 +105,17 @@ try {
         }
         return $data;
     };
-    $starter=['id'=>'starter','name'=>'Full Body A','exercises'=>['squat','bench','row']];
+    // Templates are exercise lists; set prescriptions are not stored yet.
+    $starters=[
+        ['id'=>'starter','name'=>'Full Body A','exercises'=>['squat','bench','row']],
+        ['id'=>'starter-push','name'=>'Push','exercises'=>['bench','press','pushup']],
+        ['id'=>'starter-pull','name'=>'Pull','exercises'=>['row','pulldown','curl']],
+        ['id'=>'starter-legs','name'=>'Legs','exercises'=>['squat','deadlift','split']],
+        ['id'=>'starter-upper','name'=>'Upper Body','exercises'=>['bench','row','press','pulldown']],
+        ['id'=>'starter-lower','name'=>'Lower Body','exercises'=>['squat','deadlift','split']],
+    ];
     if ($method==='GET' && $path==='/exercises') respond(200,['exercises'=>$catalog]);
-    if ($method==='GET' && $path==='/routines') respond(200,['routines'=>array_merge([$starter],array_values($userStore()['routines'] ?? []))]);
+    if ($method==='GET' && $path==='/routines') respond(200,['routines'=>array_merge($starters,array_values($userStore()['routines'] ?? []))]);
     if (($method==='POST' && $path==='/routines') || ($method==='PATCH' && preg_match('~^/routines/([a-f0-9]{32})$~D',$path,$match))) {
         $new=routine(body(),$catalog);
         $new['id']=$match[1] ?? bin2hex(random_bytes(16));

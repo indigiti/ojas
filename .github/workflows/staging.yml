@@ -20,6 +20,8 @@ jobs:
         run: |
           find apps/api -name '*.php' -print0 | xargs -0 -n1 php -l
           bash tests/api-smoke.sh
+      - name: Test training calculations
+        run: node --test tests/training.test.mjs
       - name: Validate Python syntax
         run: python3 -m py_compile services/coach/main.py
       - name: Build static web app
