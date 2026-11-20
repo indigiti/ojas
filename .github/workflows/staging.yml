@@ -26,6 +26,7 @@ jobs:
         working-directory: apps/web
         env:
           NEXT_PUBLIC_BASE_PATH: /ojas
+          NEXT_PUBLIC_DIGIOPS: '1'
         run: |
           npm install --no-audit --no-fund
           npm run build

@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 function data_dir(): string {
-    $path = realpath(getenv('OJAS_DATA_DIR') ?: '');
+    $path = realpath(defined('OJAS_DEPLOY_DATA_DIR') ? OJAS_DEPLOY_DATA_DIR : (getenv('OJAS_DATA_DIR') ?: ''));
     $root = realpath($_SERVER['DOCUMENT_ROOT'] ?? '') ?: null;
     if (!$path || !$root || $path === $root || str_starts_with($path, $root . DIRECTORY_SEPARATOR) || !is_dir($path) || !is_writable($path)) {
         throw new RuntimeException('Private storage is not configured');

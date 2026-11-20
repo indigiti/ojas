@@ -1,2 +1,3 @@
 RewriteEngine On
-RewriteRule ^api/v1(?:/.*)?$ /ojas/ojas-api.php [END]
+RewriteRule ^api/v1/index\.php$ - [END]
+RewriteRule ^api/v1(?:/.*)?$ /ojas/api/v1/index.php [END]

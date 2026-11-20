@@ -30,11 +30,11 @@ function routine(array $x, array $catalog): array {
 }
 try {
     $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-    $base = rtrim(getenv('OJAS_API_PREFIX') ?: '/api/v1','/');
-    $path = is_string($uri) && str_starts_with($uri,$base.'/') ? substr($uri,strlen($base)) : '';
+    $base = defined('OJAS_DEPLOY_API_PREFIX') ? OJAS_DEPLOY_API_PREFIX : rtrim(getenv('OJAS_API_PREFIX') ?: '/api/v1','/');
+    $path = defined('OJAS_DEPLOY_API_ROUTE') ? OJAS_DEPLOY_API_ROUTE : (is_string($uri) && str_starts_with($uri,$base.'/') ? substr($uri,strlen($base)) : '');
     $method=$_SERVER['REQUEST_METHOD'];
-    if ($path==='/health' && $method==='GET') { data_dir(); respond(200,['ok'=>true]); }
-    $local = getenv('OJAS_LOCAL_HTTP')==='1' && in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1','::1'], true);
+    if ($path==='/health' && in_array($method,['GET','HEAD'],true)) { data_dir(); respond(200,['ok'=>true]); }
+    $local = !defined('OJAS_DEPLOY_API_PREFIX') && getenv('OJAS_LOCAL_HTTP')==='1' && in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1','::1'], true);
     ini_set('session.use_strict_mode','1');
     ini_set('session.use_only_cookies','1');
     session_name($local ? 'ojas_local' : '__Secure-ojas');

@@ -15,11 +15,13 @@ const links = [{label:"Today",icon:CalendarDays},{label:"Workout",icon:Dumbbell}
 type Screen = typeof links[number]["label"];
 const box = "rounded-2xl border border-white/10 bg-neutral-900 p-4 sm:p-6";
 async function api<T>(path:string, method="GET", payload?:unknown, csrf?:string):Promise<T> {
- const res = await fetch(prefix+path,{method,cache:"no-store",credentials:"same-origin",signal:AbortSignal.timeout(15000),
+ const url = process.env.NEXT_PUBLIC_DIGIOPS === "1" ? prefix+"/index.php?route="+encodeURIComponent(path) : prefix+path;
+ const res = await fetch(url,{method,cache:"no-store",credentials:"same-origin",signal:AbortSignal.timeout(15000),
   headers:{...(payload!==undefined?{"Content-Type":"application/json"}:{}),...(csrf?{"X-CSRF-Token":csrf}:{})},
   body:payload===undefined?undefined:JSON.stringify(payload)});
- const data=await res.json();
- if(!res.ok) throw new Error(data.error || "Request failed");
+ let data;
+ try { data=await res.json(); } catch { throw new Error("OJAS could not reach its API (HTTP "+res.status+"). Retry, or ask the staging administrator to check API health."); }
+ if(!res.ok) throw new Error(data?.error || "Request failed (HTTP "+res.status+").");
  return data;
 }
 const err=(e:unknown)=>e instanceof Error?e.message:"Something went wrong";
