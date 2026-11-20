@@ -47,3 +47,11 @@ test('muscle workload credits primary muscle once, excludes warmups and honors t
  const history=[{finishedAt:'2024-02-01T00:00:00Z',sets:[lift('bench',60)]},{finishedAt:'2024-02-02T00:00:00Z',sets:[lift('bench',40),{...lift('bench',20),kind:'warmup'},lift('pushup',0),{...lift('bench',0,0),kind:'timed'}]}];
  assert.deepEqual(muscleWorkouts(history,library,Date.parse('2024-02-02')),[{muscle:'Chest',sets:2,kgReps:320,last:Date.parse('2024-02-02')}]);
 });
+
+test('guided supersets alternate unfinished members and ignore warmups',async()=>{
+ const {nextSupersetExercise}=await import('../apps/web/lib/training.mjs');
+ const plan={exercises:['bench','row','squat'],targets:{bench:{group:'A',sets:1},row:{group:'A',sets:1},squat:{sets:1}}};
+ assert.equal(nextSupersetExercise(plan,'bench',[lift('bench',40),{...lift('row',10),kind:'warmup'}]),'row');
+ assert.equal(nextSupersetExercise(plan,'row',[lift('bench',40),lift('row',30)]),null);
+ assert.equal(nextSupersetExercise(plan,'squat',[]),null);
+});

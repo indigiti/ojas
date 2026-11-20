@@ -102,4 +102,6 @@ jq -e '.added>0 and .skipped==0' "$tmp/response"
 [[ $(import_backup "$backup") == 200 ]]
 jq -e '.added==0 and .skipped>0' "$tmp/response"
 curl -fsS -b "$tmp/c2" "$url/export" | jq -e '.schedule==null and (.workouts|length>0) and .bodyweight[0].kg==71.8'
+advanced=$(jq '.targets.row += {group:"A",backup:"barbell-row"}' <<< "$routine_payload")
+curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d "$advanced" "$url/routines" | jq -e '.routine.targets.row.group=="A" and .routine.targets.row.backup=="barbell-row"'
 echo "API smoke checks passed"

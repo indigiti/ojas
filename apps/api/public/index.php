@@ -40,6 +40,16 @@ function routine(array $x, array $catalog): array {
         if (!is_int($sets) || $sets<1 || $sets>20 || !is_int($reps) || $reps<1 || $reps>300
             || !is_int($rest) || $rest<0 || $rest>900) respond(422,['error'=>'Targets must be 1–20 sets, 1–300 reps, and 0–900 seconds of rest']);
         $plan['targets'][$id]=['sets'=>$sets,'reps'=>$reps,'restSeconds'=>$rest];
+        if (isset($item['group'])) {
+            if (!is_string($item['group']) || !preg_match('/^[A-Z]$/D',$item['group'])) respond(422,['error'=>'Invalid superset letter']);
+            $plan['targets'][$id]['group']=$item['group'];
+        }
+        if (isset($item['backup'])) {
+            $backup=$item['backup'];
+            if (!is_string($backup) || !isset($catalog[$backup]) || in_array($backup,$exercises,true))
+                respond(422,['error'=>'Backup must be an exercise outside this routine']);
+            $plan['targets'][$id]['backup']=$backup;
+        }
     }
     return $plan;
 }
