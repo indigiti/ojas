@@ -169,6 +169,12 @@ try {
         ['id'=>'starter-legs','name'=>'Legs','exercises'=>['squat','deadlift','split']],
         ['id'=>'starter-upper','name'=>'Upper Body','exercises'=>['bench','row','press','pulldown']],
         ['id'=>'starter-lower','name'=>'Lower Body','exercises'=>['squat','deadlift','split']],
+        ['id'=>'starter-5x5-a','name'=>'5×5 A','exercises'=>['squat','bench','barbell-row'],
+            'targets'=>array_fill_keys(['squat','bench','barbell-row'],['sets'=>5,'reps'=>5,'restSeconds'=>180])],
+        ['id'=>'starter-5x5-b','name'=>'5×5 B','exercises'=>['squat','press','deadlift'],
+            'targets'=>['squat'=>['sets'=>5,'reps'=>5,'restSeconds'=>180],
+                'press'=>['sets'=>5,'reps'=>5,'restSeconds'=>180],
+                'deadlift'=>['sets'=>1,'reps'=>5,'restSeconds'=>180]]],
     ];
     if ($method==='PUT' && $path==='/bodyweight') {
         $x=body();

@@ -140,6 +140,17 @@ export default function Page(){
   });
  }
  const muscleSummary=now?muscleWorkouts(history,library,now-7*86400000):[];
+ function swapExercise(replacement:string){
+  if(!draft||draft.pending||busy||editingSet!==null||!library[replacement]
+    ||draft.plan.exercises.includes(replacement)||draft.sets.some(s=>s.exercise===exercise)
+    ||removed?.draftId===draft.id&&removed.lift.exercise===exercise)return;
+  const targets={...draft.plan.targets};
+  if(targets[exercise])targets[replacement]=targets[exercise];
+  delete targets[exercise];
+  const plan={...draft.plan,targets,exercises:draft.plan.exercises.map(id=>id===exercise?replacement:id)};
+  void action(async()=>{await persist({...draft,plan});pickLift(replacement);N("Exercise swapped for this workout only.");});
+ }
+ const swaps=draft&&library[exercise]?Object.entries(library).filter(([id,item])=>item.muscles[0]===library[exercise].muscles[0]&&!draft.plan.exercises.includes(id)):[];
  const activeTarget=draft?.plan.targets?.[exercise];
  const suggestion=nextLoad(history,exercise,activeTarget);
  const weightChange=weeklyWeightChange(weighIns);
@@ -184,6 +195,10 @@ export default function Page(){
      <p>Suggested working load: <strong>{suggestion.kg} kg</strong>. {suggestion.reason}</p>
      <Button type="button" variant="outline" className="mt-2" disabled={busy} onClick={()=>K(String(suggestion.kg))}>Use suggested load</Button>
     </aside>}
+    {editingSet===null&&swaps.length>0&&!draft.sets.some(s=>s.exercise===exercise)&&!(removed?.draftId===draft.id&&removed.lift.exercise===exercise)&&
+     <label className="grid gap-1">Swap for this workout<select disabled={busy} value="" onChange={e=>{if(e.target.value)swapExercise(e.target.value);}}>
+      <option value="">Choose a same-muscle alternative</option>{swaps.map(([id,item])=><option key={id} value={id}>{item.name} · {item.equipment}</option>)}
+     </select></label>}
     <label className="grid gap-1">Set type<select value={extras.kind??"work"} onChange={e=>Extras({...extras,kind:e.target.value as Kind,seconds:undefined,km:undefined})}>
      <option value="work">Working set</option><option value="warmup">Warm-up</option><option value="drop">Drop set</option><option value="timed">Timed</option><option value="cardio">Cardio</option>
     </select></label>
@@ -211,7 +226,7 @@ export default function Page(){
   {screen==="Plans"&&<div className="grid gap-4 sm:grid-cols-2">
    {!edit&&<ExerciseLibrary library={library}/>}
    <ScheduleEditor key={schedule?.id??"manual"} schedule={schedule} plans={plans} disabled={busy||!online} onSave={saveSchedule}/>
-   <section className={box}><h2 className="mb-3 text-xl font-black">Routines</h2>{plans.map(p=><div key={p.id} className="border-b border-white/10 py-3"><p className="font-bold">{p.name}{plan?.id===p.id?" · Selected":""}</p><p className="mb-2 text-sm text-neutral-400">{p.exercises.map(title).join(" · ")}</p><div className="flex gap-2"><Button variant="outline" onClick={()=>{Sel(p.id);Override(true);screenTo("Today");}}>Use plan</Button>{!p.id.startsWith("starter")&&<Button variant="ghost" onClick={()=>Edit(p)}>Edit</Button>}</div></div>)}
+   <section className={box}><h2 className="mb-3 text-xl font-black">Routines</h2>{plans.map(p=><div key={p.id} className="border-b border-white/10 py-3"><p className="font-bold">{p.name}{plan?.id===p.id?" · Selected":""}</p><p className="mb-2 text-sm text-neutral-400">{p.exercises.map(title).join(" · ")}</p><div className="flex gap-2"><Button variant="outline" onClick={()=>{Sel(p.id);Override(true);screenTo("Today");}}>Use plan</Button>{p.id.startsWith("starter")?<Button variant="ghost" onClick={()=>Edit({...p,id:""})}>Customize copy</Button>:<Button variant="ghost" onClick={()=>Edit(p)}>Edit</Button>}</div></div>)}
    <Button className="mt-4" onClick={()=>Edit({id:"",name:"",exercises:[]})}>New plan</Button></section>
    {edit&&<form className={box+" grid gap-3"} onSubmit={savePlan}><h2 className="text-xl font-black">{edit.id?"Edit plan":"New plan"}</h2><label className="grid gap-1">Plan name<input required maxLength={100} value={edit.name} onChange={e=>Edit({...edit,name:e.target.value})}/></label>
     <ExerciseLibrary library={library} selected={edit.exercises} onToggle={id=>{const targets={...edit.targets};const checked=edit.exercises.includes(id);
