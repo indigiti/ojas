@@ -18,3 +18,7 @@ Acceptance: keep the Cloudways web build deployable without a Node runtime. Test
 ## Integrated release gate
 
 This draft adds exercise-level sets, reps and rests, a recurring weekly schedule with rest days, and rolling rotations. Rotation progress advances in the same atomic save as the workout. Retries and stale rotation references do not advance it twice. It is not a deployment candidate. Before marking parity complete, every category above must have tested implementation evidence, separate clearance for exercise assets, and platform validation for the native clients. Existing pilot releases remain independently deployable.
+
+## Expanded training implementation in this draft
+
+Adds warm-up/drop tags, timed and cardio entries, RPE or RIR, per-set rest, manual superset grouping, a fixed 20 kg bar calculator, bounded Epley e1RM, and authenticated training JSON export. Manual groups do not automate superset sequencing. The plate calculation does not model a gym's inventory. Export is not import or backup restoration. These limited versions do not close the broader parity rows.

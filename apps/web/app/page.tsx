@@ -2,7 +2,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { get, set, del } from "idb-keyval";
 import { Activity, ArrowRight, CalendarDays, Dumbbell, ListChecks, LogOut, Timer } from "lucide-react";
-import { recordKey, isWeightRecord, volume } from "@/lib/training.mjs";
+import { recordKey, isWeightRecord, volume, estimatedMax, platesPerSide } from "@/lib/training.mjs";
 import { ScheduleEditor, type Schedule } from "@/components/schedule-editor";
 import { Button } from "@/components/ui/button";
 
@@ -11,7 +11,10 @@ type Session = {user:User|null;csrf:string;demoAvailable?:boolean};
 type Target = {sets:number;reps:number;restSeconds:number};
 type Plan = {id:string;name:string;exercises:string[];targets?:Record<string,Target>};
 const defaultTarget:Target={sets:3,reps:8,restSeconds:90};
-type Lift = {exercise:string;kg:number;reps:number};
+type Kind="work"|"warmup"|"drop"|"timed"|"cardio";
+type Lift = {exercise:string;kg:number;reps:number;kind?:Kind;seconds?:number;km?:number;rpe?:number;rir?:number;restSeconds?:number;group?:string};
+const timed=(s:Pick<Lift,"kind">)=>s.kind==="timed"||s.kind==="cardio";
+const describe=(s:Lift)=>[timed(s)?s.seconds+" sec"+(s.km?" · "+s.km+" km":""):s.kg+" kg × "+s.reps,s.kind&&s.kind!=="work"?s.kind:null,s.rpe!=null?"RPE "+s.rpe:null,s.rir!=null?"RIR "+s.rir:null,s.group?"Superset "+s.group:null].filter(Boolean).join(" · ");
 type Rotation = {id:string;step:number;planId:string};
 type Draft = {id:string;plan:Plan;sets:Lift[];restUntil:number;pending:boolean;restSeconds?:number;rotation?:Rotation};
 type Workout = {id:string;plan:Plan;sets:Lift[];finishedAt:string;revision?:number};
@@ -43,6 +46,7 @@ export default function Page(){
  const [workoutDate,WorkoutDate]=useState("");
  const [schedule,ScheduleState]=useState<Schedule|null>(null);
  const [override,Override]=useState(false);
+ const [extras,Extras]=useState<Partial<Lift>>({});
  const uid=session?.user?.id;
  const key="ojas:draft:"+uid;
  const title=(id:string)=>catalog[id]||id;
@@ -60,18 +64,18 @@ export default function Page(){
  async function action(fn:()=>Promise<void>){B(true);N("");try{await fn();}catch(e){N(err(e));}finally{B(false);}}
  async function persist(d:Draft){await set(key,d);D(d);}
  function pickLift(id:string){
-  SetEditing(null);E(id);const last=[...(draft?.sets||[])].reverse().find(s=>s.exercise===id)||history.flatMap(w=>[...w.sets].reverse()).find(s=>s.exercise===id);
+  SetEditing(null);Extras({});E(id);const last=[...(draft?.sets||[])].reverse().find(s=>s.exercise===id)||history.flatMap(w=>[...w.sets].reverse()).find(s=>s.exercise===id);
   K(last?String(last.kg):"");Reps(last?String(last.reps):"");
  }
  function start(plan:Plan,rotation?:Rotation){void action(async()=>{if(draft||!storageOK)return;await persist({id:crypto.randomUUID(),plan,sets:[],restUntil:0,pending:false,rotation});Removed(null);pickLift(plan.exercises[0]);screenTo("Workout");});}
- function log(e:FormEvent){e.preventDefault();if(!draft||draft.pending||!draft.plan.exercises.includes(exercise))return;const w=Number(kg),n=Number(reps);
-  if(kg===""||!Number.isFinite(w)||w<0||w>1000||!Number.isInteger(n)||n<1||n>300||(editingSet===null&&draft.sets.length>=120)){N("Enter 0–1,000 kg and 1–300 reps; maximum 120 sets.");return;}
+ function log(e:FormEvent){e.preventDefault();if(!draft||draft.pending||!draft.plan.exercises.includes(exercise))return;const clock=timed(extras), w=clock?0:Number(kg),n=clock?0:Number(reps);
+  if((clock?!(extras.seconds&&Number.isInteger(extras.seconds)&&extras.seconds<=86400):kg===""||!Number.isFinite(w)||w<0||w>1000||!Number.isInteger(n)||n<1||n>300)||(editingSet===null&&draft.sets.length>=120)){N("Check the set values and the 120-set workout limit.");return;}
   void action(async()=>{
-   const lift={exercise,kg:w,reps:n}, t=Date.now();
+   const lift:Lift={...extras,exercise,kg:w,reps:n}, t=Date.now();
    const sets=editingSet===null?[...draft.sets,lift]:draft.sets.map((s,i)=>i===editingSet?lift:s);
-   await persist({...draft,sets,restUntil:editingSet===null?t+(draft.restSeconds??draft.plan.targets?.[exercise]?.restSeconds??90)*1000:draft.restUntil});
-   SetEditing(null);Now(t);
-   if(editingSet===null&&isWeightRecord(lift,history.flatMap(x=>x.sets).concat(draft.sets)))N("New weight best · "+title(exercise));
+   await persist({...draft,sets,restUntil:editingSet===null?t+(lift.restSeconds??draft.restSeconds??draft.plan.targets?.[exercise]?.restSeconds??90)*1000:draft.restUntil});
+   SetEditing(null);if(editingSet!==null)Extras({});Now(t);
+   if(editingSet===null&&!clock&&lift.kind!=="warmup"&&isWeightRecord(lift,history.flatMap(x=>x.sets).concat(draft.sets).filter(s=>s.kind!=="warmup")))N("New weight best · "+title(exercise));
   });
  }
  function finish(){if(!draft||!draft.sets.length||!session)return;void action(async()=>{
@@ -113,7 +117,13 @@ export default function Page(){
    Correct(null);N("Workout updated.");
   });
  }
- const personalBest=history.flatMap(w=>w.sets).filter(s=>s.exercise===trend).sort((a,b)=>recordKey(b)-recordKey(a))[0];
+ const personalBest=history.flatMap(w=>w.sets).filter(s=>s.exercise===trend&&!timed(s)&&s.kind!=="warmup").sort((a,b)=>recordKey(b)-recordKey(a))[0];
+ const bestEstimate=Math.max(0,...history.flatMap(w=>w.sets).filter(s=>s.exercise===trend&&s.kind!=="warmup").map(s=>estimatedMax(s)??0));
+ async function exportData(){
+  await action(async()=>{const data=await api("/export");const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));
+   const link=document.createElement("a");link.href=url;link.download="ojas-training.json";link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  });
+ }
  const activeTarget=draft?.plan.targets?.[exercise];
  const rest=Math.max(0,Math.ceil(((draft?.restUntil||0)-now)/1000));
  const points=history.filter(w=>w.sets.some(s=>s.exercise===trend)).slice(0,10).reverse().map(w=>({id:w.id,date:w.finishedAt,top:w.sets.filter(s=>s.exercise===trend).reduce((a,b)=>b.kg>a.kg||(b.kg===a.kg&&b.reps>a.reps)?b:a)}));
@@ -152,11 +162,23 @@ export default function Page(){
    </div>}
    {draft.pending?<p className="mb-4 text-amber-200">Completion pending. Retry the same save once connected.</p>:<form className="mb-5 grid gap-3" onSubmit={log}><label className="grid gap-1">Exercise<select disabled={editingSet!==null} value={exercise} onChange={e=>pickLift(e.target.value)}>{draft.plan.exercises.map(x=><option key={x} value={x}>{title(x)}</option>)}</select></label>
     {activeTarget&&<p className="text-sm text-lime-300">Target: {activeTarget.sets} sets × {activeTarget.reps} reps · {draft.sets.filter(s=>s.exercise===exercise).length} sets logged</p>}
-    <div className="grid grid-cols-2 gap-3"><label className="grid gap-1">Weight (kg)<input inputMode="decimal" type="number" min="0" max="1000" step="any" required value={kg} onChange={e=>K(e.target.value)}/></label><label className="grid gap-1">Reps<input inputMode="numeric" type="number" min="1" max="300" step="1" required value={reps} onChange={e=>Reps(e.target.value)}/></label></div>
+    <label className="grid gap-1">Set type<select value={extras.kind??"work"} onChange={e=>Extras({...extras,kind:e.target.value as Kind,seconds:undefined,km:undefined})}>
+     <option value="work">Working set</option><option value="warmup">Warm-up</option><option value="drop">Drop set</option><option value="timed">Timed</option><option value="cardio">Cardio</option>
+    </select></label>
+    {timed(extras)?<div className="grid grid-cols-2 gap-3">
+     <label className="grid gap-1">Duration (sec)<input required type="number" min="1" max="86400" value={extras.seconds??""} onChange={e=>Extras({...extras,seconds:e.target.value===""?undefined:e.target.valueAsNumber})}/></label>
+     {extras.kind==="cardio"&&<label className="grid gap-1">Distance (km, optional)<input type="number" min="0.001" max="1000" step="any" value={extras.km??""} onChange={e=>Extras({...extras,km:e.target.value===""?undefined:e.target.valueAsNumber})}/></label>}
+    </div>:<div className="grid grid-cols-2 gap-3"><label className="grid gap-1">Weight (kg)<input inputMode="decimal" type="number" min="0" max="1000" step="any" required value={kg} onChange={e=>K(e.target.value)}/></label><label className="grid gap-1">Reps<input inputMode="numeric" type="number" min="1" max="300" step="1" required value={reps} onChange={e=>Reps(e.target.value)}/></label></div>}
+    <details><summary className="cursor-pointer py-2">Set options · effort, rest, superset</summary>
+    <div className="grid grid-cols-2 gap-3">
+     {([["rpe","RPE",1,10],["rir","RIR",0,10],["restSeconds","Rest override (sec)",0,900]] as const).map(([field,label,min,max])=><label key={field} className="grid gap-1">{label}<input type="number" min={min} max={max} value={extras[field]??""} onChange={e=>Extras({...extras,...(field==="rpe"?{rir:undefined}:field==="rir"?{rpe:undefined}:{}),[field]:e.target.value===""?undefined:e.target.valueAsNumber})}/></label>)}
+     <label className="grid gap-1">Superset letter<input maxLength={1} pattern="[A-Z]" value={extras.group??""} onChange={e=>Extras({...extras,group:e.target.value.toUpperCase()||undefined})}/></label>
+    </div></details>
+    {!timed(extras)&&Number(kg)>=20&&<p className="text-sm text-neutral-400">20 kg bar · {platesPerSide(Number(kg)).label}</p>}
     <div className="flex flex-wrap gap-2"><Button disabled={busy}>{editingSet===null?"Log set":"Save set changes"}</Button>{editingSet!==null&&<Button type="button" variant="outline" disabled={busy} onClick={()=>pickLift(exercise)}>Cancel edit</Button>}</div></form>}
-   <ul className="mb-5 divide-y divide-white/10">{draft.sets.map((s,i)=><li key={i} className="flex flex-wrap items-center justify-between gap-2 py-2"><span>{i+1}. {title(s.exercise)} · {s.kg} kg × {s.reps}</span>
+   <ul className="mb-5 divide-y divide-white/10">{draft.sets.map((s,i)=><li key={i} className="flex flex-wrap items-center justify-between gap-2 py-2"><span>{i+1}. {title(s.exercise)} · {describe(s)}</span>
     {!draft.pending&&<div className="flex flex-wrap gap-1">
-     <Button variant="ghost" disabled={busy} aria-label={"Edit set "+(i+1)} onClick={()=>{SetEditing(i);E(s.exercise);K(String(s.kg));Reps(String(s.reps));}}>Edit</Button>
+     <Button variant="ghost" disabled={busy} aria-label={"Edit set "+(i+1)} onClick={()=>{SetEditing(i);E(s.exercise);K(String(s.kg));Reps(String(s.reps));Extras(s);}}>Edit</Button>
      <Button variant="ghost" disabled={busy||draft.sets.length>=120} aria-label={"Copy set "+(i+1)} onClick={()=>changeSets([...draft.sets,s])}>Copy</Button>
      <Button variant="ghost" disabled={busy} aria-label={"Remove set "+(i+1)} onClick={()=>changeSets(draft.sets.filter((_,j)=>j!==i),()=>Removed({draftId:draft.id,index:i,lift:s}))}>Remove</Button>
     </div>}</li>)}</ul>
@@ -176,15 +198,16 @@ export default function Page(){
     <div className="flex gap-2"><Button disabled={busy||!online||!edit.exercises.length}>Save plan</Button><Button type="button" variant="ghost" disabled={busy} onClick={()=>Edit(null)}>Cancel</Button></div></form>}
   </div>}
   {screen==="Progress"&&<div className="grid gap-4 sm:grid-cols-2"><section className={box}><h2 className="mb-4 text-xl font-black">Top set by session</h2><label className="grid gap-1">Exercise<select value={trend} onChange={e=>Trend(e.target.value)}>{Object.entries(catalog).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
+   {bestEstimate>0&&<p className="mt-3 text-sm">Estimated 1RM: {bestEstimate.toFixed(1)} kg · Epley, 1–10 reps</p>}
    {personalBest&&<p className="mt-3 text-sm text-lime-300">Heaviest logged set: {personalBest.kg} kg × {personalBest.reps}</p>}
    {points.length?<ol className="mt-4 grid gap-3">{points.map(p=><li key={p.id}><div className="flex justify-between text-sm"><span>{fmt(p.date)}</span><span>{p.top.kg} kg × {p.top.reps}</span></div><div className="mt-1 h-2 rounded-full bg-neutral-700"><div aria-hidden className="h-2 rounded-full bg-lime-300" style={{width:(p.top.kg/max*100)+"%"}}/></div></li>)}</ol>:<p className="mt-4 text-neutral-400">No logged sets for this exercise.</p>}</section>
-   <section className={box}><h2 className="mb-4 text-xl font-black">Workout history</h2>{history.length?history.map(w=><details key={w.id} className="border-b border-white/10 py-3"><summary className="cursor-pointer font-bold">{w.plan.name} · {fmt(w.finishedAt)} · {w.sets.length} sets</summary><ul className="mt-2 text-sm text-neutral-300">{w.sets.map((s,i)=><li key={i}>{title(s.exercise)} · {s.kg} kg × {s.reps}</li>)}</ul><Button variant="outline" className="mt-3" disabled={busy} onClick={()=>{Correct(w);WorkoutDate(w.finishedAt.slice(0,10));}}>Correct workout</Button></details>):<p className="text-neutral-400">No completed workouts.</p>}</section>
+   <section className={box}><h2 className="mb-4 text-xl font-black">Workout history</h2><Button className="mb-3" variant="outline" disabled={busy||!online} onClick={()=>void exportData()}>Export training JSON</Button>{history.length?history.map(w=><details key={w.id} className="border-b border-white/10 py-3"><summary className="cursor-pointer font-bold">{w.plan.name} · {fmt(w.finishedAt)} · {w.sets.length} sets</summary><ul className="mt-2 text-sm text-neutral-300">{w.sets.map((s,i)=><li key={i}>{title(s.exercise)} · {s.kg} kg × {s.reps}</li>)}</ul><Button variant="outline" className="mt-3" disabled={busy} onClick={()=>{Correct(w);WorkoutDate(w.finishedAt.slice(0,10));}}>Correct workout</Button></details>):<p className="text-neutral-400">No completed workouts.</p>}</section>
    {correction&&<form className={box+" grid gap-3 sm:col-span-2"} onSubmit={saveCorrection}>
     <h2 className="text-xl font-black">Correct {correction.plan.name}</h2>
     <label className="grid gap-1">Workout date (UTC)<input required type="date" min="1900-01-01" max={new Date().toISOString().slice(0,10)} value={workoutDate} onChange={e=>WorkoutDate(e.target.value)}/></label>
     {correction.sets.map((s,i)=><fieldset className="grid grid-cols-2 gap-3" key={i}><legend>{i+1}. {title(s.exercise)}</legend>
-     <label className="grid gap-1">Weight (kg)<input required type="number" min="0" max="1000" step="any" value={Number.isNaN(s.kg)?"":s.kg} onChange={e=>{const kg=e.target.valueAsNumber;Correct(c=>c?{...c,sets:c.sets.map((x,j)=>i===j?{...x,kg}:x)}:c);}}/></label>
-     <label className="grid gap-1">Reps<input required type="number" min="1" max="300" step="1" value={Number.isNaN(s.reps)?"":s.reps} onChange={e=>{const reps=e.target.valueAsNumber;Correct(c=>c?{...c,sets:c.sets.map((x,j)=>i===j?{...x,reps}:x)}:c);}}/></label>
+     {timed(s)?<p className="col-span-2">{describe(s)} · Date correction only</p>:<><label className="grid gap-1">Weight (kg)<input required type="number" min="0" max="1000" step="any" value={Number.isNaN(s.kg)?"":s.kg} onChange={e=>{const kg=e.target.valueAsNumber;Correct(c=>c?{...c,sets:c.sets.map((x,j)=>i===j?{...x,kg}:x)}:c);}}/></label>
+     <label className="grid gap-1">Reps<input required type="number" min="1" max="300" step="1" value={Number.isNaN(s.reps)?"":s.reps} onChange={e=>{const reps=e.target.valueAsNumber;Correct(c=>c?{...c,sets:c.sets.map((x,j)=>i===j?{...x,reps}:x)}:c);}}/></label></>}
     </fieldset>)}
     <div className="flex flex-wrap gap-2"><Button disabled={busy||!online}>Save correction</Button><Button type="button" variant="outline" disabled={busy} onClick={()=>Correct(null)}>Cancel</Button></div>
    </form>}</div>}

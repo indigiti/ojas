@@ -49,9 +49,37 @@ function workout_sets(mixed $sets, array $plan): array {
         foreach ($sets as $s) {
             if (!is_array($s)) respond(422,['error'=>'Invalid set']);
             $e=$s['exercise'] ?? null; $w=$s['kg'] ?? null; $n=$s['reps'] ?? null;
-            if (!in_array($e,$plan['exercises'],true) || !(is_int($w)||is_float($w)) || !is_finite($w) || $w<0 || $w>1000 || !is_int($n) || $n<1 || $n>300)
-                respond(422,['error'=>'Invalid exercise, weight or reps']);
-            $clean[]=['exercise'=>$e,'kg'=>(float)$w,'reps'=>$n];
+            $kind=$s['kind'] ?? 'work';
+            if (!in_array($e,$plan['exercises'],true) || !in_array($kind,['work','warmup','drop','timed','cardio'],true))
+                respond(422,['error'=>'Invalid exercise or set type']);
+            $time=in_array($kind,['timed','cardio'],true);
+            if (!(is_int($w)||is_float($w)) || !is_finite($w) || $w<0 || $w>1000 || !is_int($n) || $n<($time?0:1) || $n>300)
+                respond(422,['error'=>'Invalid weight or reps']);
+            $row=['exercise'=>$e,'kg'=>(float)$w,'reps'=>$n];
+            if ($kind!=='work') $row['kind']=$kind;
+            if ($time) {
+                $seconds=$s['seconds'] ?? null;
+                if (!is_int($seconds) || $seconds<1 || $seconds>86400 || $w!=0 || $n!==0)
+                    respond(422,['error'=>'Timed and cardio entries require 1–86,400 seconds and no load or reps']);
+                $row['seconds']=$seconds;
+                if ($kind==='cardio' && isset($s['km'])) {
+                    $km=$s['km'];
+                    if (!(is_int($km)||is_float($km)) || !is_finite($km) || $km<=0 || $km>1000) respond(422,['error'=>'Invalid cardio distance']);
+                    $row['km']=(float)$km;
+                }
+            }
+            foreach (['rpe'=>[1,10],'rir'=>[0,10],'restSeconds'=>[0,900]] as $field=>[$min,$max]) {
+                if (!isset($s[$field])) continue;
+                $value=$s[$field];
+                if (!is_int($value) || $value<$min || $value>$max) respond(422,['error'=>'Invalid '.$field]);
+                $row[$field]=$value;
+            }
+            if (isset($row['rpe'],$row['rir'])) respond(422,['error'=>'Enter RPE or RIR, not both']);
+            if (isset($s['group'])) {
+                if (!is_string($s['group']) || !preg_match('/^[A-Z]$/D',$s['group'])) respond(422,['error'=>'Use a single letter for a superset group']);
+                $row['group']=$s['group'];
+            }
+            $clean[]=$row;
         }
     return $clean;
 }
@@ -142,6 +170,14 @@ try {
         ['id'=>'starter-upper','name'=>'Upper Body','exercises'=>['bench','row','press','pulldown']],
         ['id'=>'starter-lower','name'=>'Lower Body','exercises'=>['squat','deadlift','split']],
     ];
+    if ($method==='GET' && $path==='/export') {
+        $d=$userStore();
+        $workouts=array_values($d['workouts'] ?? []);
+        foreach ($workouts as &$workout) unset($workout['fingerprint'],$workout['rotation']);
+        unset($workout);
+        respond(200,['version'=>1,'exportedAt'=>gmdate(DATE_ATOM),'routines'=>array_values($d['routines'] ?? []),
+            'workouts'=>$workouts,'schedule'=>$d['schedule'] ?? null]);
+    }
     if ($method==='GET' && $path==='/schedule') {
         respond(200,['schedule'=>$userStore()['schedule'] ?? null]);
     }

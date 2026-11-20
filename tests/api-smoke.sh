@@ -70,4 +70,12 @@ jq -e '.schedule.step==1' "$tmp/response"
 jq -e '.schedule.step==1' "$tmp/response"
 [[ $(put_schedule "$tmp/c1" "$csrf" "$rotation") == 200 ]]
 jq -e --arg sid "$sid" '.schedule.step==1 and .schedule.id==$sid' "$tmp/response"
+rich=$(jq '.id="42345678-abcd-4321-abcd-123456789abc" | .sets=[{exercise:"squat",kg:35,reps:8,kind:"warmup",rir:3,restSeconds:0,group:"A"},{exercise:"squat",kg:0,reps:0,kind:"cardio",seconds:180,km:0.5}]' <<< "$data")
+[[ $(post "$rich") == 201 ]]
+jq -e '.workout.sets[0].restSeconds==0 and .workout.sets[1].km==0.5' "$tmp/response"
+[[ $(post "$rich") == 200 ]]
+[[ $(post "$(jq '.sets[0].rpe=8' <<< "$rich")") == 422 ]]
+[[ $(post "$(jq '.sets[1].seconds=0' <<< "$rich")") == 422 ]]
+curl -fsS -b "$tmp/c1" "$url/export" | jq -e '.version==1 and (.workouts | any(.sets | any(.kind=="cardio"))) and (.workouts | all(has("fingerprint")|not))'
+curl -fsS -b "$tmp/c2" "$url/export" | jq -e '.workouts==[] and .routines==[]'
 echo "API smoke checks passed"
