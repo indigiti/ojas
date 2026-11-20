@@ -107,7 +107,7 @@ curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/js
 [[ $(curl -sS -o /dev/null -w '%{http_code}' "$url/photos") == 401 ]]
 [[ $(curl -sS -o /dev/null -w '%{http_code}' -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d '{"jpeg":"bad"}' "$url/photos") == 422 ]]
 curl -fsS -b "$tmp/c1" "$url/photos" | jq -e '.photos==[]'
-jpeg='/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAEAAQDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAb/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAABgf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCLAGVxf//Z'
+jpeg='/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAAEAAQBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AP//Z'
 photo=$(curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d "$(jq -nc --arg jpeg "$jpeg" '{jpeg:$jpeg}')" "$url/photos" | jq -er .id)
 curl -fsS -b "$tmp/c1" "$url/photos/$photo" | jq -e --arg jpeg "$jpeg" '.jpeg==$jpeg'
 curl -fsS -b "$tmp/c1" "$url/photos" | jq -e --arg id "$photo" '.photos[0].id==$id and (.photos[0]|has("jpeg")|not)'
