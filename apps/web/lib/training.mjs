@@ -61,3 +61,22 @@ export function weeklyWeightChange(entries) {
   const mean=a=>a.reduce((x,y)=>x+y,0)/a.length;
   return mean(recent)-mean(prior);
 }
+
+export function muscleWorkouts(history, library, since) {
+  const result=new Map();
+  for(const workout of history){
+    const date=Date.parse(workout.finishedAt);
+    if(!Number.isFinite(date)||date<since) continue;
+    for(const s of workout.sets){
+      if(!["work","drop"].includes(s.kind??"work")) continue;
+      const primary=library[s.exercise]?.muscles[0];
+      if(!primary) continue;
+      const row=result.get(primary)??{muscle:primary,sets:0,kgReps:0,last:0};
+      row.sets++;
+      row.kgReps+=s.kg*s.reps;
+      row.last=Math.max(row.last,date);
+      result.set(primary,row);
+    }
+  }
+  return [...result.values()].sort((a,b)=>b.sets-a.sets||a.muscle.localeCompare(b.muscle));
+}

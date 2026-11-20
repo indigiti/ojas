@@ -28,3 +28,9 @@ Bodyweight: dated weigh-ins, same-date corrections, recent history and JSON expo
 Progression in this draft: optional +2.5 kg recommendation after all prescribed working sets meet their targets at one load; no automatic plan edits. Other progression rules and deloads remain open. Bodyweight shows a change between adjacent seven-day averages when each window contains at least two weigh-ins.
 
 Exercise discovery: a first-party 36-entry catalog supports name, equipment and muscle filters in the browser and routine editor. Existing exercise IDs are unchanged. This does not include animations or the upstream catalog.
+
+## Remaining parity release
+
+Keep the remaining implementation on the existing integration PR rather than opening a PR per feature. Green CI verifies the current changes, not parity. The final gate includes the remaining checklist, media rights, native validation, and an Apache/PHP deployment without a Node server.
+
+The web progress screen now summarizes seven days of working/drop sets, external load volume and last-trained dates by primary muscle. This is not an anatomical map or a recovery prediction.

@@ -40,3 +40,10 @@ test('weight change compares two sampled seven-day windows',async()=>{
  assert.equal(weeklyWeightChange(rows),-2);
  assert.equal(weeklyWeightChange(rows.slice(0,3)),null);
 });
+
+test('muscle workload credits primary muscle once, excludes warmups and honors the cutoff',async()=>{
+ const {muscleWorkouts}=await import('../apps/web/lib/training.mjs');
+ const library={bench:{muscles:['Chest','Triceps']},pushup:{muscles:['Chest']}};
+ const history=[{finishedAt:'2024-02-01T00:00:00Z',sets:[lift('bench',60)]},{finishedAt:'2024-02-02T00:00:00Z',sets:[lift('bench',40),{...lift('bench',20),kind:'warmup'},lift('pushup',0),{...lift('bench',0,0),kind:'timed'}]}];
+ assert.deepEqual(muscleWorkouts(history,library,Date.parse('2024-02-02')),[{muscle:'Chest',sets:2,kgReps:320,last:Date.parse('2024-02-02')}]);
+});

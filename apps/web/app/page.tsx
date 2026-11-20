@@ -2,7 +2,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { get, set, del } from "idb-keyval";
 import { Activity, ArrowRight, CalendarDays, Dumbbell, ListChecks, LogOut, Timer } from "lucide-react";
-import { recordKey, isWeightRecord, volume, estimatedMax, platesPerSide, nextLoad, weeklyWeightChange } from "@/lib/training.mjs";
+import { recordKey, isWeightRecord, volume, estimatedMax, platesPerSide, nextLoad, weeklyWeightChange, muscleWorkouts } from "@/lib/training.mjs";
 import { ScheduleEditor, type Schedule } from "@/components/schedule-editor";
 import { ExerciseLibrary, type Exercise } from "@/components/exercise-library";
 import { Button } from "@/components/ui/button";
@@ -139,6 +139,7 @@ export default function Page(){
    const link=document.createElement("a");link.href=url;link.download="ojas-training.json";link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   });
  }
+ const muscleSummary=now?muscleWorkouts(history,library,now-7*86400000):[];
  const activeTarget=draft?.plan.targets?.[exercise];
  const suggestion=nextLoad(history,exercise,activeTarget);
  const weightChange=weeklyWeightChange(weighIns);
@@ -226,6 +227,10 @@ export default function Page(){
    {bestEstimate>0&&<p className="mt-3 text-sm">Estimated 1RM: {bestEstimate.toFixed(1)} kg · Epley, 1–10 reps</p>}
    {personalBest&&<p className="mt-3 text-sm text-lime-300">Heaviest logged set: {personalBest.kg} kg × {personalBest.reps}</p>}
    {points.length?<ol className="mt-4 grid gap-3">{points.map(p=><li key={p.id}><div className="flex justify-between text-sm"><span>{fmt(p.date)}</span><span>{p.top.kg} kg × {p.top.reps}</span></div><div className="mt-1 h-2 rounded-full bg-neutral-700"><div aria-hidden className="h-2 rounded-full bg-lime-300" style={{width:(p.top.kg/max*100)+"%"}}/></div></li>)}</ol>:<p className="mt-4 text-neutral-400">No logged sets for this exercise.</p>}</section>
+   <section className={box}><h2 className="mb-2 text-xl font-black">Muscle workload · last 7 days</h2>
+   <p className="mb-3 text-sm text-neutral-400">Working and drop sets count toward the catalog’s primary muscle only. External load × reps does not include body weight. Last trained is not a recovery estimate.</p>
+   {muscleSummary.length?<ul className="divide-y divide-white/10">{muscleSummary.map(x=><li key={x.muscle} className="py-2"><p className="font-bold">{x.muscle} · {x.sets} sets</p><p className="text-sm text-neutral-400">{x.kgReps.toLocaleString(undefined,{maximumFractionDigits:2})} kg·reps · Last trained {fmt(new Date(x.last).toISOString())}</p></li>)}</ul>:<p className="text-sm text-neutral-400">No qualifying sets in the last seven days.</p>}
+   </section>
    <section className={box}><h2 className="mb-4 text-xl font-black">Body weight</h2>
    <form className="grid gap-3" onSubmit={saveWeight}>
     <label className="grid gap-1">Date (UTC)<input type="date" required min="1900-01-01" max={now?new Date(now).toISOString().slice(0,10):undefined} value={weightDate} onChange={e=>WeighDate(e.target.value)}/></label>
