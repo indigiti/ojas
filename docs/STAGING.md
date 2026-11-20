@@ -23,3 +23,7 @@ php "$APP_HOME/private_html/ojas/api/invite.php" pilot@example.com
 ```
 
 Set APP_HOME to the Cloudways application root. If you do not have shell access, have a server administrator provision the pilot account. Share the generated password only over a private channel. Test mobile sign-in, plan creation, workout draft recovery after reload, offline logging with the page already open, retry after reconnect, and Progress. Do not open public signup on JSON storage.
+
+## Staging demo
+
+On stage.digiti.in, the sign-in screen offers **Try staging demo**. It creates an isolated PHP session with a 30-minute maximum lifetime, no email or password, and temporary plans and workouts. PHP session cleanup governs physical removal of expired session files; data is inaccessible after expiry or sign-out and never written to the pilot JSON store. Do not enter real personal data into demo sessions. Other hostnames do not offer the demo; keep production ingress restricted to its own accepted hostnames.

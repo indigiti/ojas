@@ -37,3 +37,30 @@ test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/v1/index.php?route=%2
 test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/v1/index.php?route[]=health")" = 404
 test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/runtime/users.json")" = 404
 test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/storage.php")" = 404
+
+gateway="$base/api/v1/index.php"
+cookie() { sed -nE 's/^Set-Cookie: (__Secure-ojas=[^;]+).*/\1/ip' "$tmp/headers" | tail -1; }
+curl -fsS -D "$tmp/headers" "$gateway?route=/me" | jq -e '.demoAvailable == false' >/dev/null
+token=$(curl -fsS -D "$tmp/headers" "$gateway?route=/me" | jq -er .csrf)
+test "$(curl -sS -o /dev/null -w '%{http_code}' -b "$(cookie)" -H "X-CSRF-Token: $token" -X POST "$gateway?route=/auth/demo")" = 404
+stage=(-H 'Host: stage.digiti.in')
+open_demo() {
+  local token anon
+  token=$(curl -fsS "${stage[@]}" -D "$tmp/headers" "$gateway?route=/me" | jq -er 'select(.demoAvailable == true) | .csrf')
+  anon=$(cookie)
+  test -n "$anon"
+  test "$(curl -sS "${stage[@]}" -b "$anon" -o /dev/null -w '%{http_code}' -X POST "$gateway?route=/auth/demo")" = 403
+  curl -fsS "${stage[@]}" -b "$anon" -D "$tmp/headers" -H "X-CSRF-Token: $token" -X POST "$gateway?route=/auth/demo" | jq -er 'select(.user.demo == true) | .csrf'
+}
+first_csrf=$(open_demo)
+first=$(cookie)
+payload='{"id":"12345678-abcd-4321-abcd-123456789abc","plan":{"name":"Demo","exercises":["squat"]},"sets":[{"exercise":"squat","kg":35,"reps":8}]}'
+curl -fsS "${stage[@]}" -b "$first" -H "X-CSRF-Token: $first_csrf" -H 'Content-Type: application/json' -d "$payload" "$gateway?route=/workouts" | jq -e '.workout.sets[0].reps == 8'
+curl -fsS "${stage[@]}" -b "$first" "$gateway?route=/progress" | jq -e '.workouts | length == 1'
+open_demo >/dev/null
+second=$(cookie)
+test "$first" != "$second"
+curl -fsS "${stage[@]}" -b "$second" "$gateway?route=/progress" | jq -e '.workouts | length == 0'
+curl -fsS "${stage[@]}" -b "$first" -H "X-CSRF-Token: $first_csrf" -X POST "$gateway?route=/auth/logout" | jq -e .ok
+test "$(curl -sS "${stage[@]}" -b "$first" -o /dev/null -w '%{http_code}' "$gateway?route=/progress")" = 401
+test -z "$(find "$tmp/private_html/ojas/runtime" -type f -name 'user_*.json' -print -quit)"
