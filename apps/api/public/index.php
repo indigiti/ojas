@@ -161,6 +161,23 @@ try {
         $_SESSION=['user'=>['id'=>$account['id'],'email'=>$email],'csrf'=>bin2hex(random_bytes(32))];
         respond(200,$_SESSION);
     }
+    if ($method==='POST' && $path==='/auth/pair/redeem') {
+        if (!empty($_SESSION['user'])) respond(409,['error'=>'Sign out before pairing']);
+        $token=body()['token'] ?? null;
+        if (!is_string($token) || !preg_match('/^[0-9a-f]{48}$/D',$token)) respond(422,['error'=>'Invalid pairing code']);
+        $key=hash('sha256',$token);
+        $paired=null;
+        store('pairings',static function($items) use($key,&$paired){
+            $row=$items[$key] ?? null;
+            if (!$row || $row['expires']<=time()) respond(401,['error'=>'Pairing code expired or already used']);
+            $paired=$row['user'];
+            unset($items[$key]);
+            return $items;
+        });
+        if (!session_regenerate_id(true)) throw new RuntimeException('Session reset failed');
+        $_SESSION=['user'=>$paired,'csrf'=>bin2hex(random_bytes(32))];
+        respond(200,$_SESSION);
+    }
     $user=$_SESSION['user'] ?? null;
     if (!$user) respond(401,['error'=>'Sign in required']);
     if ($method==='POST' && $path==='/auth/logout') {
@@ -171,6 +188,17 @@ try {
     }
     $isDemo=!empty($user['demo']);
     if (!$isDemo) session_write_close();
+    if ($method==='POST' && $path==='/auth/pair/create') {
+        if ($isDemo) respond(403,['error'=>'Pairing is unavailable in the demo']);
+        $token=bin2hex(random_bytes(24));
+        $expires=time()+300;
+        store('pairings',static function($items) use($user,$token,$expires){
+            $items=array_filter($items,static fn($row)=>$row['expires']>time() && $row['user']['id']!==$user['id']);
+            $items[hash('sha256',$token)]=['user'=>$user,'expires'=>$expires];
+            return $items;
+        });
+        respond(201,['token'=>$token,'expiresAt'=>gmdate(DATE_ATOM,$expires)]);
+    }
     $userStore=static function (?callable $change=null) use ($user,$isDemo): array {
         if (!$isDemo) return store('user_'.$user['id'],$change);
         $data=$_SESSION['demoData'];

@@ -55,6 +55,7 @@ export default function Page(){
  const [weighIns,WeighIns]=useState<WeighIn[]>([]);
  const [weighDate,WeighDate]=useState("");
  const [weighKg,WeighKg]=useState("");
+ const [pair,Pair]=useState<{token:string;expiresAt:string}|null>(null);
  const uid=session?.user?.id;
  const key="ojas:draft:"+uid;
  const title=(id:string)=>catalog[id]||id;
@@ -98,10 +99,17 @@ export default function Page(){
  function login(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=new FormData(e.currentTarget);void action(async()=>{
   const s=session||await api<Session>("/me");S(await api<Session>("/auth/login","POST",{email:f.get("email"),password:f.get("password")},s.csrf));screenTo("Today");
  });}
+ function pairDevice(e:FormEvent<HTMLFormElement>){
+  e.preventDefault();const token=String(new FormData(e.currentTarget).get("code")??"").trim().toLowerCase();
+  void action(async()=>{
+   const s=session||await api<Session>("/me");
+   S(await api<Session>("/auth/pair/redeem","POST",{token},s.csrf));screenTo("Today");
+  });
+ }
  function demo(){void action(async()=>{
   const s=await api<Session>("/me");S(await api<Session>("/auth/demo","POST",{},s.csrf));screenTo("Today");
  });}
- function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);if(session.user?.demo)void del(key).catch(()=>{});S(null);D(null);ScheduleState(null);Override(false);Correct(null);SetEditing(null);Removed(null);P([]);H([]);WeighIns([]);WeighKg("");WeighDate("");C({});Library({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
+ function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);if(session.user?.demo)void del(key).catch(()=>{});S(null);Pair(null);D(null);ScheduleState(null);Override(false);Correct(null);SetEditing(null);Removed(null);P([]);H([]);WeighIns([]);WeighKg("");WeighDate("");C({});Library({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
  function savePlan(e:FormEvent){e.preventDefault();if(!edit||!session)return;void action(async()=>{
   const {routine}=await api<{routine:Plan}>(edit.id?"/routines/"+edit.id:"/routines",edit.id?"PATCH":"POST",{...edit,targets:Object.fromEntries(edit.exercises.map(id=>{const target=edit.targets?.[id]??defaultTarget;return [id,{...target,backup:target.backup&&!edit.exercises.includes(target.backup)?target.backup:undefined}];}))},session.csrf);
   P(p=>p.some(x=>x.id===routine.id)?p.map(x=>x.id===routine.id?routine:x):[...p,routine]);Sel(routine.id);Edit(null);
@@ -185,8 +193,16 @@ export default function Page(){
    <form className="mt-6 grid gap-4" onSubmit={login}><label className="grid gap-1">Email<input name="email" type="email" required autoComplete="username"/></label>
    <label className="grid gap-1">Password<input name="password" type="password" required autoComplete="current-password"/></label>
    <Button disabled={busy||!online}>Sign in <ArrowRight size={17}/></Button></form>
+   <details className="mt-4"><summary className="cursor-pointer">Pair from a signed-in device</summary>
+   <form className="mt-3 grid gap-3" onSubmit={pairDevice}><label className="grid gap-1">One-time pairing code<input name="code" required maxLength={48} autoComplete="off" spellCheck={false} autoCapitalize="none"/></label><Button variant="outline" disabled={!online||busy}>Pair device</Button></form></details>
    {session?.demoAvailable&&<div className="mt-5 grid gap-2 border-t border-white/10 pt-5"><Button type="button" variant="outline" disabled={busy||!online} onClick={demo}>Try staging demo</Button><p className="text-center text-xs text-neutral-400">No password needed. Demo data expires after 30 minutes or on sign-out.</p></div>}</section>:<>
   <h1 className="mb-5 text-4xl font-black tracking-tight sm:text-5xl">{screen}</h1>
+  {screen==="Today"&&session?.user&&!session.user.demo&&<details className="mb-4 rounded-xl border border-white/10 p-3">
+   <summary className="cursor-pointer">Pair another device</summary>
+   <p className="my-2 text-sm text-neutral-400">Only share this code with your own device. It grants account access and can be used once within five minutes.</p>
+   <Button variant="outline" disabled={!online||busy} onClick={()=>void action(async()=>Pair(await api<{token:string;expiresAt:string}>("/auth/pair/create","POST",{},session.csrf)))}>Generate code</Button>
+   {pair&&now<Date.parse(pair.expiresAt)&&<output className="mt-2 block select-all break-all font-mono">{pair.token}</output>}
+  </details>}
   {screen==="Today"&&<div className="grid gap-4 sm:grid-cols-2">
    <section className={box+" bg-gradient-to-br from-lime-950 to-neutral-900"}><p className="text-xs font-bold uppercase tracking-widest text-lime-300">Next session</p>
     <h2 className="my-3 text-2xl font-black">{draft?.plan.name||plan?.name||(restDay?"Rest day":"Choose a plan")}</h2>

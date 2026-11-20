@@ -44,3 +44,5 @@ Routine targets now support a planned backup and a superset letter. Working sets
 The integration adds a schematic front/back muscle workload and training-recency view, configurable double progression, and advisory 10% deloads after repeated misses at the same load. It does not estimate physiological recovery or cover every upstream progression model.
 
 Progress photos: authenticated per-account JPEG storage outside the public document root, browser resizing, deletion and side-by-side viewing; disabled for demo users and excluded from JSON exports. Production media retention and backup policy must be validated before launch.
+
+Device pairing: authenticated pilot users can issue a five-minute, single-use high-entropy code; a new code invalidates the old one. Redemption creates a fresh PHP session. This is not passkey sign-in or a device revocation dashboard.
