@@ -2,7 +2,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { get, set, del } from "idb-keyval";
 import { Activity, ArrowRight, CalendarDays, Dumbbell, ListChecks, LogOut, Timer } from "lucide-react";
-import { recordKey, isWeightRecord, volume, estimatedMax, platesPerSide } from "@/lib/training.mjs";
+import { recordKey, isWeightRecord, volume, estimatedMax, platesPerSide, nextLoad, weeklyWeightChange } from "@/lib/training.mjs";
 import { ScheduleEditor, type Schedule } from "@/components/schedule-editor";
 import { Button } from "@/components/ui/button";
 
@@ -138,6 +138,8 @@ export default function Page(){
   });
  }
  const activeTarget=draft?.plan.targets?.[exercise];
+ const suggestion=nextLoad(history,exercise,activeTarget);
+ const weightChange=weeklyWeightChange(weighIns);
  const rest=Math.max(0,Math.ceil(((draft?.restUntil||0)-now)/1000));
  const points=history.filter(w=>w.sets.some(s=>s.exercise===trend)).slice(0,10).reverse().map(w=>({id:w.id,date:w.finishedAt,top:w.sets.filter(s=>s.exercise===trend).reduce((a,b)=>b.kg>a.kg||(b.kg===a.kg&&b.reps>a.reps)?b:a)}));
  const max=Math.max(1,...points.map(p=>p.top.kg));
@@ -174,7 +176,11 @@ export default function Page(){
     <p className="text-sm text-neutral-400">Session volume: {volume(draft.sets).toLocaleString(undefined,{maximumFractionDigits:2})} kg</p>
    </div>}
    {draft.pending?<p className="mb-4 text-amber-200">Completion pending. Retry the same save once connected.</p>:<form className="mb-5 grid gap-3" onSubmit={log}><label className="grid gap-1">Exercise<select disabled={editingSet!==null} value={exercise} onChange={e=>pickLift(e.target.value)}>{draft.plan.exercises.map(x=><option key={x} value={x}>{title(x)}</option>)}</select></label>
-    {activeTarget&&<p className="text-sm text-lime-300">Target: {activeTarget.sets} sets × {activeTarget.reps} reps · {draft.sets.filter(s=>s.exercise===exercise).length} sets logged</p>}
+    {activeTarget&&<p className="text-sm text-lime-300">Target: {activeTarget.sets} sets × {activeTarget.reps} reps · {draft.sets.filter(s=>s.exercise===exercise&&(!s.kind||s.kind==="work")).length} working sets logged</p>}
+    {suggestion&&!timed(extras)&&editingSet===null&&<aside className="rounded-xl border border-white/10 p-3 text-sm">
+     <p>Suggested working load: <strong>{suggestion.kg} kg</strong>. {suggestion.reason}</p>
+     <Button type="button" variant="outline" className="mt-2" disabled={busy} onClick={()=>K(String(suggestion.kg))}>Use suggested load</Button>
+    </aside>}
     <label className="grid gap-1">Set type<select value={extras.kind??"work"} onChange={e=>Extras({...extras,kind:e.target.value as Kind,seconds:undefined,km:undefined})}>
      <option value="work">Working set</option><option value="warmup">Warm-up</option><option value="drop">Drop set</option><option value="timed">Timed</option><option value="cardio">Cardio</option>
     </select></label>
@@ -221,6 +227,7 @@ export default function Page(){
     <p className="text-sm text-neutral-400">Saving the same date replaces that day’s entry.</p>
     <Button disabled={busy||!online}>Save weigh-in</Button>
    </form>
+   {weightChange!==null&&<p className="mt-4 text-sm">Change between 7-day averages: {weightChange>0?"+":""}{weightChange.toFixed(2)} kg</p>}
    {orderedWeights.length>0&&<ul className="mt-4 divide-y divide-white/10">{orderedWeights.slice(0,14).map(x=><li className="flex justify-between py-2" key={x.date}><span>{fmt(x.date)}</span><span>{x.kg} kg</span></li>)}</ul>}
    </section>
    <section className={box}><h2 className="mb-4 text-xl font-black">Workout history</h2><Button className="mb-3" variant="outline" disabled={busy||!online} onClick={()=>void exportData()}>Export training JSON</Button>{history.length?history.map(w=><details key={w.id} className="border-b border-white/10 py-3"><summary className="cursor-pointer font-bold">{w.plan.name} · {fmt(w.finishedAt)} · {w.sets.length} sets</summary><ul className="mt-2 text-sm text-neutral-300">{w.sets.map((s,i)=><li key={i}>{title(s.exercise)} · {describe(s)}</li>)}</ul><Button variant="outline" className="mt-3" disabled={busy} onClick={()=>{Correct(w);WorkoutDate(w.finishedAt.slice(0,10));}}>Correct workout</Button></details>):<p className="text-neutral-400">No completed workouts.</p>}</section>

@@ -5,3 +5,6 @@ export function volume(sets:Lift[]):number;
 
 export function estimatedMax(lift:Lift):number|null;
 export function platesPerSide(total:number):{label:string};
+
+export function nextLoad(history:{sets:(Lift & {kind?:string})[]}[],exercise:string,target?:{sets:number;reps:number}):{kg:number;reason:string}|null;
+export function weeklyWeightChange(entries:{date:string;kg:number}[]):number|null;

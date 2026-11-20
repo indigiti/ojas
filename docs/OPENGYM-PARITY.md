@@ -24,3 +24,5 @@ This draft adds exercise-level sets, reps and rests, a recurring weekly schedule
 Adds warm-up/drop tags, timed and cardio entries, RPE or RIR, per-set rest, manual superset grouping, a fixed 20 kg bar calculator, bounded Epley e1RM, and authenticated training JSON export. Manual groups do not automate superset sequencing. The plate calculation does not model a gym's inventory. Export is not import or backup restoration. These limited versions do not close the broader parity rows.
 
 Bodyweight: dated weigh-ins, same-date corrections, recent history and JSON export are implemented in this draft. A goal line, progress photos and a rate-of-change chart remain open.
+
+Progression in this draft: optional +2.5 kg recommendation after all prescribed working sets meet their targets at one load; no automatic plan edits. Other progression rules and deloads remain open. Bodyweight shows a change between adjacent seven-day averages when each window contains at least two weigh-ins.
