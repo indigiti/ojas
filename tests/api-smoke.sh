@@ -128,6 +128,7 @@ redeem() {
 [[ $(redeem "$old") == 401 ]]
 [[ $(redeem "$code") == 200 ]]
 jq -e '.user.email=="test@example.com"' "$tmp/response"
+rm -f "$tmp/paired"
 paircsrf=$(curl -fsS -c "$tmp/paired" "$url/me" | jq -er .csrf)
 [[ $(redeem "$code") == 401 ]]
 echo "API smoke checks passed"
