@@ -104,4 +104,31 @@ jq -e '.added==0 and .skipped>0' "$tmp/response"
 curl -fsS -b "$tmp/c2" "$url/export" | jq -e '.schedule==null and (.workouts|length>0) and .bodyweight[0].kg==71.8'
 advanced=$(jq '.targets.row += {group:"A",backup:"barbell-row"}' <<< "$routine_payload")
 curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d "$advanced" "$url/routines" | jq -e '.routine.targets.row.group=="A" and .routine.targets.row.backup=="barbell-row"'
+[[ $(curl -sS -o /dev/null -w '%{http_code}' "$url/photos") == 401 ]]
+[[ $(curl -sS -o /dev/null -w '%{http_code}' -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d '{"jpeg":"bad"}' "$url/photos") == 422 ]]
+curl -fsS -b "$tmp/c1" "$url/photos" | jq -e '.photos==[]'
+jpeg='/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAAEAAQBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AP//Z'
+photo=$(curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d "$(jq -nc --arg jpeg "$jpeg" '{jpeg:$jpeg}')" "$url/photos" | jq -er .id)
+curl -fsS -b "$tmp/c1" "$url/photos/$photo" | jq -e --arg jpeg "$jpeg" '.jpeg==$jpeg'
+curl -fsS -b "$tmp/c1" "$url/photos" | jq -e --arg id "$photo" '.photos[0].id==$id and (.photos[0]|has("jpeg")|not)'
+[[ $(curl -sS -o /dev/null -w '%{http_code}' -b "$tmp/c2" "$url/photos/$photo") == 404 ]]
+curl -fsS -b "$tmp/c2" -H "X-CSRF-Token: $csrf2" -X DELETE "$url/photos/$photo" | jq -e .ok
+[[ $(curl -sS -o /dev/null -w '%{http_code}' -b "$tmp/c1" "$url/photos/$photo") == 200 ]]
+curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -X DELETE "$url/photos/$photo" | jq -e .ok
+[[ $(curl -sS -o /dev/null -w '%{http_code}' -b "$tmp/c1" "$url/photos/$photo") == 404 ]]
+create_pair() {
+ curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d '{}' "$url/auth/pair/create" | jq -er .token
+}
+old=$(create_pair)
+code=$(create_pair)
+paircsrf=$(curl -fsS -c "$tmp/paired" "$url/me" | jq -er .csrf)
+redeem() {
+ curl -sS -b "$tmp/paired" -c "$tmp/paired" -o "$tmp/response" -w '%{http_code}' -H "X-CSRF-Token: $paircsrf" -H 'Content-Type: application/json' -d "$(jq -nc --arg token "$1" '{token:$token}')" "$url/auth/pair/redeem"
+}
+[[ $(redeem "$old") == 401 ]]
+[[ $(redeem "$code") == 200 ]]
+jq -e '.user.email=="test@example.com"' "$tmp/response"
+rm -f "$tmp/paired"
+paircsrf=$(curl -fsS -c "$tmp/paired" "$url/me" | jq -er .csrf)
+[[ $(redeem "$code") == 401 ]]
 echo "API smoke checks passed"

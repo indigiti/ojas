@@ -5,12 +5,14 @@ import { Activity, ArrowRight, CalendarDays, Dumbbell, ListChecks, LogOut, Timer
 import { recordKey, isWeightRecord, volume, estimatedMax, platesPerSide, nextLoad, weeklyWeightChange, muscleWorkouts, nextSupersetExercise } from "@/lib/training.mjs";
 import { ScheduleEditor, type Schedule } from "@/components/schedule-editor";
 import { ExerciseLibrary, type Exercise } from "@/components/exercise-library";
+import { MuscleMap } from "@/components/muscle-map";
+import { ProgressPhotos } from "@/components/progress-photos";
 import { Button } from "@/components/ui/button";
 
 type WeighIn={date:string;kg:number};
 type User = {id:string;email?:string;demo?:boolean};
 type Session = {user:User|null;csrf:string;demoAvailable?:boolean};
-type Target = {sets:number;reps:number;restSeconds:number;group?:string;backup?:string};
+type Target = {sets:number;reps:number;restSeconds:number;group?:string;backup?:string;repCeiling?:number;deloadAfter?:number};
 type Plan = {id:string;name:string;exercises:string[];targets?:Record<string,Target>};
 const defaultTarget:Target={sets:3,reps:8,restSeconds:90};
 type Kind="work"|"warmup"|"drop"|"timed"|"cardio";
@@ -53,6 +55,7 @@ export default function Page(){
  const [weighIns,WeighIns]=useState<WeighIn[]>([]);
  const [weighDate,WeighDate]=useState("");
  const [weighKg,WeighKg]=useState("");
+ const [pair,Pair]=useState<{token:string;expiresAt:string}|null>(null);
  const uid=session?.user?.id;
  const key="ojas:draft:"+uid;
  const title=(id:string)=>catalog[id]||id;
@@ -96,10 +99,17 @@ export default function Page(){
  function login(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=new FormData(e.currentTarget);void action(async()=>{
   const s=session||await api<Session>("/me");S(await api<Session>("/auth/login","POST",{email:f.get("email"),password:f.get("password")},s.csrf));screenTo("Today");
  });}
+ function pairDevice(e:FormEvent<HTMLFormElement>){
+  e.preventDefault();const token=String(new FormData(e.currentTarget).get("code")??"").trim().toLowerCase();
+  void action(async()=>{
+   const s=session||await api<Session>("/me");
+   S(await api<Session>("/auth/pair/redeem","POST",{token},s.csrf));screenTo("Today");
+  });
+ }
  function demo(){void action(async()=>{
   const s=await api<Session>("/me");S(await api<Session>("/auth/demo","POST",{},s.csrf));screenTo("Today");
  });}
- function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);if(session.user?.demo)void del(key).catch(()=>{});S(null);D(null);ScheduleState(null);Override(false);Correct(null);SetEditing(null);Removed(null);P([]);H([]);WeighIns([]);WeighKg("");WeighDate("");C({});Library({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
+ function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);if(session.user?.demo)void del(key).catch(()=>{});S(null);Pair(null);D(null);ScheduleState(null);Override(false);Correct(null);SetEditing(null);Removed(null);P([]);H([]);WeighIns([]);WeighKg("");WeighDate("");C({});Library({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
  function savePlan(e:FormEvent){e.preventDefault();if(!edit||!session)return;void action(async()=>{
   const {routine}=await api<{routine:Plan}>(edit.id?"/routines/"+edit.id:"/routines",edit.id?"PATCH":"POST",{...edit,targets:Object.fromEntries(edit.exercises.map(id=>{const target=edit.targets?.[id]??defaultTarget;return [id,{...target,backup:target.backup&&!edit.exercises.includes(target.backup)?target.backup:undefined}];}))},session.csrf);
   P(p=>p.some(x=>x.id===routine.id)?p.map(x=>x.id===routine.id?routine:x):[...p,routine]);Sel(routine.id);Edit(null);
@@ -183,8 +193,16 @@ export default function Page(){
    <form className="mt-6 grid gap-4" onSubmit={login}><label className="grid gap-1">Email<input name="email" type="email" required autoComplete="username"/></label>
    <label className="grid gap-1">Password<input name="password" type="password" required autoComplete="current-password"/></label>
    <Button disabled={busy||!online}>Sign in <ArrowRight size={17}/></Button></form>
+   <details className="mt-4"><summary className="cursor-pointer">Pair from a signed-in device</summary>
+   <form className="mt-3 grid gap-3" onSubmit={pairDevice}><label className="grid gap-1">One-time pairing code<input name="code" required maxLength={48} autoComplete="off" spellCheck={false} autoCapitalize="none"/></label><Button variant="outline" disabled={!online||busy}>Pair device</Button></form></details>
    {session?.demoAvailable&&<div className="mt-5 grid gap-2 border-t border-white/10 pt-5"><Button type="button" variant="outline" disabled={busy||!online} onClick={demo}>Try staging demo</Button><p className="text-center text-xs text-neutral-400">No password needed. Demo data expires after 30 minutes or on sign-out.</p></div>}</section>:<>
   <h1 className="mb-5 text-4xl font-black tracking-tight sm:text-5xl">{screen}</h1>
+  {screen==="Today"&&session?.user&&!session.user.demo&&<details className="mb-4 rounded-xl border border-white/10 p-3">
+   <summary className="cursor-pointer">Pair another device</summary>
+   <p className="my-2 text-sm text-neutral-400">Only share this code with your own device. It grants account access and can be used once within five minutes.</p>
+   <Button variant="outline" disabled={!online||busy} onClick={()=>void action(async()=>Pair(await api<{token:string;expiresAt:string}>("/auth/pair/create","POST",{},session.csrf)))}>Generate code</Button>
+   {pair&&now<Date.parse(pair.expiresAt)&&<output className="mt-2 block select-all break-all font-mono">{pair.token}</output>}
+  </details>}
   {screen==="Today"&&<div className="grid gap-4 sm:grid-cols-2">
    <section className={box+" bg-gradient-to-br from-lime-950 to-neutral-900"}><p className="text-xs font-bold uppercase tracking-widest text-lime-300">Next session</p>
     <h2 className="my-3 text-2xl font-black">{draft?.plan.name||plan?.name||(restDay?"Rest day":"Choose a plan")}</h2>
@@ -205,8 +223,8 @@ export default function Page(){
    {draft.pending?<p className="mb-4 text-amber-200">Completion pending. Retry the same save once connected.</p>:<form className="mb-5 grid gap-3" onSubmit={log}><label className="grid gap-1">Exercise<select disabled={editingSet!==null} value={exercise} onChange={e=>pickLift(e.target.value)}>{draft.plan.exercises.map(x=><option key={x} value={x}>{title(x)}</option>)}</select></label>
     {activeTarget&&<p className="text-sm text-lime-300">Target: {activeTarget.sets} sets × {activeTarget.reps} reps · {draft.sets.filter(s=>s.exercise===exercise&&(!s.kind||s.kind==="work")).length} working sets logged</p>}
     {suggestion&&!timed(extras)&&editingSet===null&&<aside className="rounded-xl border border-white/10 p-3 text-sm">
-     <p>Suggested working load: <strong>{suggestion.kg} kg</strong>. {suggestion.reason}</p>
-     <Button type="button" variant="outline" className="mt-2" disabled={busy} onClick={()=>K(String(suggestion.kg))}>Use suggested load</Button>
+     <p>Suggested working load: <strong>{suggestion.kg} kg{suggestion.reps!==undefined?" × "+suggestion.reps:""}</strong>. {suggestion.reason}</p>
+     <Button type="button" variant="outline" className="mt-2" disabled={busy} onClick={()=>{K(String(suggestion.kg));if(suggestion.reps!==undefined)Reps(String(suggestion.reps));}}>Use suggestion</Button>
     </aside>}
     {editingSet===null&&swaps.length>0&&!draft.sets.some(s=>s.exercise===exercise)&&!(removed?.draftId===draft.id&&removed.lift.exercise===exercise)&&
      <label className="grid gap-1">Swap for this workout<select disabled={busy} value="" onChange={e=>{if(e.target.value)swapExercise(e.target.value);}}>
@@ -248,17 +266,20 @@ export default function Page(){
     }}/>
     {edit.exercises.map(id=><fieldset key={id} className="grid grid-cols-3 gap-2"><legend className="mb-2 font-bold">{title(id)} targets</legend>
      {([["sets","Sets",1,20],["reps","Reps",1,300],["restSeconds","Rest (sec)",0,900]] as const).map(([field,label,min,max])=><label className="grid gap-1 text-sm" key={field}>{label}<input required type="number" min={min} max={max} step="1" value={Number.isNaN(edit.targets?.[id]?.[field])?"":edit.targets?.[id]?.[field]??defaultTarget[field]} onChange={e=>Edit({...edit,targets:{...edit.targets,[id]:{...(edit.targets?.[id]??defaultTarget),[field]:e.target.valueAsNumber}}})}/></label>)}
+     <label className="col-span-3 grid gap-1 text-sm">Double progression: upper reps (optional)<input type="number" min={(edit.targets?.[id]?.reps??defaultTarget.reps)+1} max="300" value={edit.targets?.[id]?.repCeiling??""} onChange={e=>Edit({...edit,targets:{...edit.targets,[id]:{...(edit.targets?.[id]??defaultTarget),repCeiling:e.target.value?e.target.valueAsNumber:undefined}}})}/></label>
+     <label className="col-span-3 grid gap-1 text-sm">Suggest deload after missed sessions (optional)<input type="number" min="2" max="6" value={edit.targets?.[id]?.deloadAfter??""} onChange={e=>Edit({...edit,targets:{...edit.targets,[id]:{...(edit.targets?.[id]??defaultTarget),deloadAfter:e.target.value?e.target.valueAsNumber:undefined}}})}/></label>
      <label className="col-span-3 grid gap-1 text-sm">Superset letter (optional)<input maxLength={1} pattern="[A-Z]" value={edit.targets?.[id]?.group??""} onChange={e=>Edit({...edit,targets:{...edit.targets,[id]:{...(edit.targets?.[id]??defaultTarget),group:e.target.value.toUpperCase()||undefined}}})}/></label>
      <label className="col-span-3 grid gap-1 text-sm">Planned backup (optional)<select value={edit.exercises.includes(edit.targets?.[id]?.backup??"")?"":edit.targets?.[id]?.backup??""} onChange={e=>Edit({...edit,targets:{...edit.targets,[id]:{...(edit.targets?.[id]??defaultTarget),backup:e.target.value||undefined}}})}><option value="">None</option>{Object.entries(catalog).filter(([key])=>!edit.exercises.includes(key)).map(([key,name])=><option value={key} key={key}>{name}</option>)}</select></label>
     </fieldset>)}
     <div className="flex gap-2"><Button disabled={busy||!online||!edit.exercises.length}>Save plan</Button><Button type="button" variant="ghost" disabled={busy} onClick={()=>Edit(null)}>Cancel</Button></div></form>}
   </div>}
-  {screen==="Progress"&&<div className="grid gap-4 sm:grid-cols-2"><section className={box}><h2 className="mb-4 text-xl font-black">Top set by session</h2><label className="grid gap-1">Exercise<select value={trend} onChange={e=>Trend(e.target.value)}>{Object.entries(catalog).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
+  {screen==="Progress"&&<div className="grid gap-4 sm:grid-cols-2">{session?.user&&!session.user.demo&&<ProgressPhotos key={session.user.id} request={api} csrf={session.csrf} online={online}/>}<section className={box}><h2 className="mb-4 text-xl font-black">Top set by session</h2><label className="grid gap-1">Exercise<select value={trend} onChange={e=>Trend(e.target.value)}>{Object.entries(catalog).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
    {bestEstimate>0&&<p className="mt-3 text-sm">Estimated 1RM: {bestEstimate.toFixed(1)} kg · Epley, 1–10 reps</p>}
    {personalBest&&<p className="mt-3 text-sm text-lime-300">Heaviest logged set: {personalBest.kg} kg × {personalBest.reps}</p>}
    {points.length?<ol className="mt-4 grid gap-3">{points.map(p=><li key={p.id}><div className="flex justify-between text-sm"><span>{fmt(p.date)}</span><span>{p.top.kg} kg × {p.top.reps}</span></div><div className="mt-1 h-2 rounded-full bg-neutral-700"><div aria-hidden className="h-2 rounded-full bg-lime-300" style={{width:(p.top.kg/max*100)+"%"}}/></div></li>)}</ol>:<p className="mt-4 text-neutral-400">No logged sets for this exercise.</p>}</section>
    <section className={box}><h2 className="mb-2 text-xl font-black">Muscle workload · last 7 days</h2>
    <p className="mb-3 text-sm text-neutral-400">Working and drop sets count toward the catalog’s primary muscle only. External load × reps does not include body weight. Last trained is not a recovery estimate.</p>
+   <MuscleMap rows={muscleSummary} now={now}/>
    {muscleSummary.length?<ul className="divide-y divide-white/10">{muscleSummary.map(x=><li key={x.muscle} className="py-2"><p className="font-bold">{x.muscle} · {x.sets} sets</p><p className="text-sm text-neutral-400">{x.kgReps.toLocaleString(undefined,{maximumFractionDigits:2})} kg·reps · Last trained {fmt(new Date(x.last).toISOString())}</p></li>)}</ul>:<p className="text-sm text-neutral-400">No qualifying sets in the last seven days.</p>}
    </section>
    <section className={box}><h2 className="mb-4 text-xl font-black">Body weight</h2>

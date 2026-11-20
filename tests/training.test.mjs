@@ -55,3 +55,13 @@ test('guided supersets alternate unfinished members and ignore warmups',async()=
  assert.equal(nextSupersetExercise(plan,'row',[lift('bench',40),lift('row',30)]),null);
  assert.equal(nextSupersetExercise(plan,'squat',[]),null);
 });
+
+test('double progression raises reps before load, and a deload requires repeated misses',async()=>{
+ const {nextLoad}=await import('../apps/web/lib/training.mjs');
+ const history=(...reps)=>reps.map(n=>({sets:[lift('bench',50,n),lift('bench',50,n)]}));
+ const target={sets:2,reps:8,repCeiling:10,deloadAfter:2};
+ assert.equal(nextLoad(history(9),'bench',target).reps,10);
+ assert.equal(nextLoad(history(10),'bench',target).kg,52.5);
+ assert.equal(nextLoad(history(7,8),'bench',target).kg,50);
+ assert.equal(nextLoad(history(7,7),'bench',target).kg,45);
+});

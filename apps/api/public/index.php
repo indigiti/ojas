@@ -10,10 +10,10 @@ function respond(int $status, array $result): never {
     echo json_encode($result, JSON_THROW_ON_ERROR);
     exit;
 }
-function body(): array {
+function body(int $limit=65536): array {
     if (strtolower(trim(explode(';',$_SERVER['CONTENT_TYPE'] ?? '')[0])) !== 'application/json') respond(415,['error'=>'JSON required']);
-    $raw=file_get_contents('php://input',false,null,0,65537);
-    if (strlen($raw)>65536) respond(413,['error'=>'Request too large']);
+    $raw=file_get_contents('php://input',false,null,0,$limit+1);
+    if (strlen($raw)>$limit) respond(413,['error'=>'Request too large']);
     try { $parsed=json_decode($raw,true,32,JSON_THROW_ON_ERROR); }
     catch (JsonException) { respond(400,['error'=>'Invalid JSON']); }
     if (!is_array($parsed)) respond(400,['error'=>'Invalid request']);
@@ -40,6 +40,16 @@ function routine(array $x, array $catalog): array {
         if (!is_int($sets) || $sets<1 || $sets>20 || !is_int($reps) || $reps<1 || $reps>300
             || !is_int($rest) || $rest<0 || $rest>900) respond(422,['error'=>'Targets must be 1–20 sets, 1–300 reps, and 0–900 seconds of rest']);
         $plan['targets'][$id]=['sets'=>$sets,'reps'=>$reps,'restSeconds'=>$rest];
+        if (isset($item['repCeiling'])) {
+            $top=$item['repCeiling'];
+            if (!is_int($top)||$top<=$reps||$top>300) respond(422,['error'=>'Upper rep target must exceed the base rep target']);
+            $plan['targets'][$id]['repCeiling']=$top;
+        }
+        if (isset($item['deloadAfter'])) {
+            $limit=$item['deloadAfter'];
+            if (!is_int($limit)||$limit<2||$limit>6) respond(422,['error'=>'Deload threshold must be 2–6 sessions']);
+            $plan['targets'][$id]['deloadAfter']=$limit;
+        }
         if (isset($item['group'])) {
             if (!is_string($item['group']) || !preg_match('/^[A-Z]$/D',$item['group'])) respond(422,['error'=>'Invalid superset letter']);
             $plan['targets'][$id]['group']=$item['group'];
@@ -151,6 +161,23 @@ try {
         $_SESSION=['user'=>['id'=>$account['id'],'email'=>$email],'csrf'=>bin2hex(random_bytes(32))];
         respond(200,$_SESSION);
     }
+    if ($method==='POST' && $path==='/auth/pair/redeem') {
+        if (!empty($_SESSION['user'])) respond(409,['error'=>'Sign out before pairing']);
+        $token=body()['token'] ?? null;
+        if (!is_string($token) || !preg_match('/^[0-9a-f]{48}$/D',$token)) respond(422,['error'=>'Invalid pairing code']);
+        $key=hash('sha256',$token);
+        $paired=null;
+        store('pairings',static function($items) use($key,&$paired){
+            $row=$items[$key] ?? null;
+            if (!$row || $row['expires']<=time()) respond(401,['error'=>'Pairing code expired or already used']);
+            $paired=$row['user'];
+            unset($items[$key]);
+            return $items;
+        });
+        if (!session_regenerate_id(true)) throw new RuntimeException('Session reset failed');
+        $_SESSION=['user'=>$paired,'csrf'=>bin2hex(random_bytes(32))];
+        respond(200,$_SESSION);
+    }
     $user=$_SESSION['user'] ?? null;
     if (!$user) respond(401,['error'=>'Sign in required']);
     if ($method==='POST' && $path==='/auth/logout') {
@@ -161,6 +188,17 @@ try {
     }
     $isDemo=!empty($user['demo']);
     if (!$isDemo) session_write_close();
+    if ($method==='POST' && $path==='/auth/pair/create') {
+        if ($isDemo) respond(403,['error'=>'Pairing is unavailable in the demo']);
+        $token=bin2hex(random_bytes(24));
+        $expires=time()+300;
+        store('pairings',static function($items) use($user,$token,$expires){
+            $items=array_filter($items,static fn($row)=>$row['expires']>time() && $row['user']['id']!==$user['id']);
+            $items[hash('sha256',$token)]=['user'=>$user,'expires'=>$expires];
+            return $items;
+        });
+        respond(201,['token'=>$token,'expiresAt'=>gmdate(DATE_ATOM,$expires)]);
+    }
     $userStore=static function (?callable $change=null) use ($user,$isDemo): array {
         if (!$isDemo) return store('user_'.$user['id'],$change);
         $data=$_SESSION['demoData'];
@@ -186,6 +224,42 @@ try {
                 'press'=>['sets'=>5,'reps'=>5,'restSeconds'=>180],
                 'deadlift'=>['sets'=>1,'reps'=>5,'restSeconds'=>180]]],
     ];
+    if ($path==='/photos' || preg_match('~^/photos/([a-f0-9]{32})$~D',$path,$photoMatch)) {
+        if ($isDemo) respond(403,['error'=>'Progress photos are disabled in the staging demo']);
+        $photoStore='photos_'.$user['id'];
+        if ($method==='GET' && $path==='/photos') {
+            $items=array_values(store($photoStore));
+            respond(200,['photos'=>array_map(static fn($p)=>['id'=>$p['id'],'createdAt'=>$p['createdAt']],array_reverse($items))]);
+        }
+        if ($method==='GET' && isset($photoMatch[1])) {
+            $photo=store($photoStore)[$photoMatch[1]] ?? null;
+            if (!$photo) respond(404,['error'=>'Photo not found']);
+            respond(200,['jpeg'=>$photo['jpeg']]);
+        }
+        if ($method==='DELETE' && isset($photoMatch[1])) {
+            store($photoStore,static function($items) use($photoMatch){
+                unset($items[$photoMatch[1]]);
+                return $items;
+            });
+            respond(200,['ok'=>true]);
+        }
+        if ($method==='POST' && $path==='/photos') {
+            $x=body(280000);
+            $jpeg=$x['jpeg'] ?? null;
+            $bytes=is_string($jpeg) ? base64_decode($jpeg,true) : false;
+            $info=$bytes!==false && strlen($bytes)<=196608 ? @getimagesizefromstring($bytes) : false;
+            if (!$info || $info[2]!==IMAGETYPE_JPEG || max($info[0],$info[1])>1024)
+                respond(422,['error'=>'Expected a JPEG up to 1,024 px and 192 KiB']);
+            $id=bin2hex(random_bytes(16));
+            $createdAt=gmdate(DATE_ATOM);
+            store($photoStore,static function($items) use($id,$createdAt,$bytes){
+                if (count($items)>=12) respond(422,['error'=>'Delete an older photo before adding another']);
+                $items[$id]=['id'=>$id,'createdAt'=>$createdAt,'jpeg'=>base64_encode($bytes)];
+                return $items;
+            });
+            respond(201,['id'=>$id,'createdAt'=>$createdAt]);
+        }
+    }
     if ($method==='PUT' && $path==='/bodyweight') {
         $x=body();
         $date=$x['date'] ?? null; $kg=$x['kg'] ?? null;
