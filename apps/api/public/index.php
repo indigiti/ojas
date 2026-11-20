@@ -341,11 +341,13 @@ try {
         $x=body();
         $mode=$x['mode'] ?? null;
         $slots=$x['slots'] ?? null;
+        $expected=$x['revision'] ?? 0;
+        if (!is_int($expected)||$expected<0) respond(422,['error'=>'Invalid schedule revision']);
         if (!in_array($mode,['manual','weekly','rotation'],true) || !is_array($slots) || !array_is_list($slots)
             || ($mode==='manual' && count($slots)!==0) || ($mode==='weekly' && count($slots)!==7)
             || ($mode==='rotation' && (count($slots)<1 || count($slots)>12)))
             respond(422,['error'=>'Invalid schedule']);
-        $d=$userStore(static function($d) use ($mode,$slots,$starters) {
+        $d=$userStore(static function($d) use ($mode,$slots,$starters,$expected) {
             $ids=array_merge(array_column($starters,'id'),array_keys($d['routines'] ?? []));
             foreach ($slots as $slot) {
                 if ($slot===null && $mode==='weekly') continue;
@@ -353,7 +355,9 @@ try {
             }
             $previous=$d['schedule'] ?? null;
             if (($previous['mode'] ?? null)===$mode && $previous['slots']===$slots) return $d;
-            $d['schedule']=['mode'=>$mode,'slots'=>$slots,'id'=>bin2hex(random_bytes(16)),'step'=>0];
+            $revision=$previous['revision'] ?? 0;
+            if ($revision!==$expected) respond(409,['error'=>'Schedule changed on another device. Reopen it before editing.']);
+            $d['schedule']=['revision'=>$revision+1,'mode'=>$mode,'slots'=>$slots,'id'=>bin2hex(random_bytes(16)),'step'=>0];
             return $d;
         });
         respond(200,['schedule'=>$d['schedule']]);
@@ -361,14 +365,19 @@ try {
     if ($method==='GET' && $path==='/exercises') respond(200,['exercises'=>$catalog,'library'=>require __DIR__.'/../exercise-library.php']);
     if ($method==='GET' && $path==='/routines') respond(200,['routines'=>array_merge($starters,array_values($userStore()['routines'] ?? []))]);
     if (($method==='POST' && $path==='/routines') || ($method==='PATCH' && preg_match('~^/routines/([a-f0-9]{32})$~D',$path,$match))) {
-        $new=routine(body(),$catalog);
+        $x=body();
+        $new=routine($x,$catalog);
+        $expected=$x['revision'] ?? 0;
+        if (!is_int($expected)||$expected<0) respond(422,['error'=>'Invalid routine revision']);
         $new['id']=$match[1] ?? bin2hex(random_bytes(16));
-        $userStore(function($d) use ($new,$method) {
+        $saved=$userStore(function($d) use ($new,$method,$expected) {
             if ($method==='PATCH' && !isset($d['routines'][$new['id']])) respond(404,['error'=>'Plan not found']);
-            $d['routines'][$new['id']]=$new;
+            $previous=$d['routines'][$new['id']]['revision'] ?? 0;
+            if ($method==='PATCH' && $previous!==$expected) respond(409,['error'=>'Routine changed on another device. Reopen it before editing.']);
+            $d['routines'][$new['id']]=$new+['revision'=>$method==='PATCH'?$previous+1:0];
             return $d;
         });
-        respond($method==='POST'?201:200,['routine'=>$new]);
+        respond($method==='POST'?201:200,['routine'=>$saved['routines'][$new['id']]]);
     }
     if ($method==='GET' && in_array($path,['/workouts','/progress'],true)) {
         $d=$userStore();

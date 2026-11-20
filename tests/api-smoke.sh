@@ -58,7 +58,7 @@ jq -e '.schedule.slots[0]=="starter" and .schedule.slots[1]==null' "$tmp/respons
 curl -fsS -b "$tmp/c2" "$url/schedule" | jq -e '.schedule==null'
 foreign=$(jq -nc --arg plan "$plan" '{mode:"rotation",slots:[$plan]}')
 [[ $(put_schedule "$tmp/c2" "$csrf2" "$foreign") == 422 ]]
-rotation='{"mode":"rotation","slots":["starter","starter-push"]}'
+rotation='{"mode":"rotation","slots":["starter","starter-push"],"revision":1}'
 [[ $(put_schedule "$tmp/c1" "$csrf" "$rotation") == 200 ]]
 sid=$(jq -er .schedule.id "$tmp/response")
 payload=$(jq --arg sid "$sid" '.id="22345678-abcd-4321-abcd-123456789abc" | .rotation={id:$sid,step:0,planId:"starter"}' <<< "$data")
@@ -131,4 +131,12 @@ jq -e '.user.email=="test@example.com"' "$tmp/response"
 rm -f "$tmp/paired"
 paircsrf=$(curl -fsS -c "$tmp/paired" "$url/me" | jq -er .csrf)
 [[ $(redeem "$code") == 401 ]]
+[[ $(put_schedule "$tmp/c1" "$csrf" "$weekly") == 409 ]]
+edit_routine() {
+ curl -sS -o "$tmp/response" -w '%{http_code}' -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -X PATCH -d "$1" "$url/routines/$plan"
+}
+[[ $(edit_routine '{"name":"Updated","exercises":["row"],"revision":0}') == 200 ]]
+jq -e '.routine.revision==1' "$tmp/response"
+[[ $(edit_routine '{"name":"Stale","exercises":["row"],"revision":0}') == 409 ]]
+curl -fsS -b "$tmp/c1" "$url/routines" | jq -e --arg id "$plan" '.routines | any(.id==$id and .name=="Updated")'
 echo "API smoke checks passed"
