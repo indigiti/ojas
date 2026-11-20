@@ -13,7 +13,7 @@ type WeighIn={date:string;kg:number};
 type User = {id:string;email?:string;demo?:boolean};
 type Session = {user:User|null;csrf:string;demoAvailable?:boolean};
 type Target = {sets:number;reps:number;restSeconds:number;group?:string;backup?:string;repCeiling?:number;deloadAfter?:number};
-type Plan = {id:string;name:string;exercises:string[];targets?:Record<string,Target>};
+type Plan = {id:string;revision?:number;name:string;exercises:string[];targets?:Record<string,Target>};
 const defaultTarget:Target={sets:3,reps:8,restSeconds:90};
 type Kind="work"|"warmup"|"drop"|"timed"|"cardio";
 type Lift = {exercise:string;kg:number;reps:number;kind?:Kind;seconds?:number;km?:number;rpe?:number;rir?:number;restSeconds?:number;group?:string};
@@ -121,7 +121,7 @@ export default function Page(){
  const restDay=usesSchedule&&schedule?.mode==="weekly"&&!scheduledId;
  function saveSchedule(mode:Schedule["mode"],slots:(string|null)[]){
   if(!session)return;
-  void action(async()=>{const result=await api<{schedule:Schedule}>("/schedule","PUT",{mode,slots},session.csrf);ScheduleState(result.schedule);Override(false);N("Schedule saved.");});
+  void action(async()=>{const result=await api<{schedule:Schedule}>("/schedule","PUT",{mode,slots,revision:schedule?.revision??0},session.csrf);ScheduleState(result.schedule);Override(false);N("Schedule saved.");});
  }
  function changeSets(sets:Lift[],after?:()=>void){
   if(!draft||draft.pending||busy||sets.length>120)return;

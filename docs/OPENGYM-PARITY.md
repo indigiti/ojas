@@ -46,3 +46,5 @@ The integration adds a schematic front/back muscle workload and training-recency
 Progress photos: authenticated per-account JPEG storage outside the public document root, browser resizing, deletion and side-by-side viewing; disabled for demo users and excluded from JSON exports. Production media retention and backup policy must be validated before launch.
 
 Device pairing: authenticated pilot users can issue a five-minute, single-use high-entropy code; a new code invalidates the old one. Redemption creates a fresh PHP session. This is not passkey sign-in or a device revocation dashboard.
+
+Routine and schedule writes reject stale revisions, in addition to existing completed-workout revision checks. This prevents silent overwrites for these records; it is not offline replay or field-level merge.

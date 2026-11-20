@@ -2,7 +2,7 @@
 import {useState} from "react";
 import {Button} from "@/components/ui/button";
 
-export type Schedule = {mode:"manual"|"weekly"|"rotation";slots:(string|null)[];id:string;step:number};
+export type Schedule = {mode:"manual"|"weekly"|"rotation";slots:(string|null)[];id:string;step:number;revision?:number};
 const weekdays=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 export function ScheduleEditor({schedule,plans,disabled,onSave}:{
  schedule:Schedule|null;plans:{id:string;name:string}[];disabled:boolean;
