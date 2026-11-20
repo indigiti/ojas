@@ -2,7 +2,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { get, set, del } from "idb-keyval";
 import { Activity, ArrowRight, CalendarDays, Dumbbell, ListChecks, LogOut, Timer } from "lucide-react";
-import { recordKey, isWeightRecord, volume, estimatedMax, platesPerSide, nextLoad, weeklyWeightChange, muscleWorkouts } from "@/lib/training.mjs";
+import { recordKey, isWeightRecord, volume, estimatedMax, platesPerSide, nextLoad, weeklyWeightChange, muscleWorkouts, nextSupersetExercise } from "@/lib/training.mjs";
 import { ScheduleEditor, type Schedule } from "@/components/schedule-editor";
 import { ExerciseLibrary, type Exercise } from "@/components/exercise-library";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 type WeighIn={date:string;kg:number};
 type User = {id:string;email?:string;demo?:boolean};
 type Session = {user:User|null;csrf:string;demoAvailable?:boolean};
-type Target = {sets:number;reps:number;restSeconds:number};
+type Target = {sets:number;reps:number;restSeconds:number;group?:string;backup?:string};
 type Plan = {id:string;name:string;exercises:string[];targets?:Record<string,Target>};
 const defaultTarget:Target={sets:3,reps:8,restSeconds:90};
 type Kind="work"|"warmup"|"drop"|"timed"|"cardio";
@@ -77,10 +77,12 @@ export default function Page(){
  function log(e:FormEvent){e.preventDefault();if(!draft||draft.pending||!draft.plan.exercises.includes(exercise))return;const clock=timed(extras), w=clock?0:Number(kg),n=clock?0:Number(reps);
   if((clock?!(extras.seconds&&Number.isInteger(extras.seconds)&&extras.seconds<=86400):kg===""||!Number.isFinite(w)||w<0||w>1000||!Number.isInteger(n)||n<1||n>300)||(editingSet===null&&draft.sets.length>=120)){N("Check the set values and the 120-set workout limit.");return;}
   void action(async()=>{
-   const lift:Lift={...extras,exercise,kg:w,reps:n}, t=Date.now();
+   const lift:Lift={...extras,exercise,kg:w,reps:n,group:extras.group??draft.plan.targets?.[exercise]?.group}, t=Date.now();
    const sets=editingSet===null?[...draft.sets,lift]:draft.sets.map((s,i)=>i===editingSet?lift:s);
    await persist({...draft,sets,restUntil:editingSet===null?t+(lift.restSeconds??draft.restSeconds??draft.plan.targets?.[exercise]?.restSeconds??90)*1000:draft.restUntil});
    SetEditing(null);if(editingSet!==null)Extras({});Now(t);
+   const next=editingSet===null&&(!lift.kind||lift.kind==="work")?nextSupersetExercise(draft.plan,exercise,sets):null;
+   if(next)pickLift(next);
    if(editingSet===null&&!clock&&lift.kind!=="warmup"&&isWeightRecord(lift,history.flatMap(x=>x.sets).concat(draft.sets).filter(s=>s.kind!=="warmup")))N("New weight best · "+title(exercise));
   });
  }
@@ -99,7 +101,7 @@ export default function Page(){
  });}
  function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);if(session.user?.demo)void del(key).catch(()=>{});S(null);D(null);ScheduleState(null);Override(false);Correct(null);SetEditing(null);Removed(null);P([]);H([]);WeighIns([]);WeighKg("");WeighDate("");C({});Library({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
  function savePlan(e:FormEvent){e.preventDefault();if(!edit||!session)return;void action(async()=>{
-  const {routine}=await api<{routine:Plan}>(edit.id?"/routines/"+edit.id:"/routines",edit.id?"PATCH":"POST",{...edit,targets:Object.fromEntries(edit.exercises.map(id=>[id,edit.targets?.[id]??defaultTarget]))},session.csrf);
+  const {routine}=await api<{routine:Plan}>(edit.id?"/routines/"+edit.id:"/routines",edit.id?"PATCH":"POST",{...edit,targets:Object.fromEntries(edit.exercises.map(id=>{const target=edit.targets?.[id]??defaultTarget;return [id,{...target,backup:target.backup&&!edit.exercises.includes(target.backup)?target.backup:undefined}];}))},session.csrf);
   P(p=>p.some(x=>x.id===routine.id)?p.map(x=>x.id===routine.id?routine:x):[...p,routine]);Sel(routine.id);Edit(null);
  });}
  const usesSchedule=!override&&schedule!==null&&schedule.mode!=="manual";
@@ -134,12 +136,34 @@ export default function Page(){
    WeighIns(entries=>[...entries.filter(x=>x.date!==entry.date),entry]);WeighKg("");N("Weigh-in saved.");
   });
  }
+ function importData(file?:File){
+  if(!file||!session||session.user?.demo)return;
+  void action(async()=>{
+   if(file.size>65536)throw new Error("The pilot accepts OJAS JSON files up to 64 KiB.");
+   const parsed:unknown=JSON.parse(await file.text());
+   const result=await api<{added:number;skipped:number}>("/import","POST",parsed,session.csrf);
+   await refresh();N("Import complete: "+result.added+" added, "+result.skipped+" existing entries kept.");
+  });
+ }
  async function exportData(){
   await action(async()=>{const data=await api("/export");const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));
    const link=document.createElement("a");link.href=url;link.download="ojas-training.json";link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   });
  }
  const muscleSummary=now?muscleWorkouts(history,library,now-7*86400000):[];
+ function swapExercise(replacement:string){
+  if(!draft||draft.pending||busy||editingSet!==null||!library[replacement]
+    ||draft.plan.exercises.includes(replacement)||draft.sets.some(s=>s.exercise===exercise)
+    ||removed?.draftId===draft.id&&removed.lift.exercise===exercise)return;
+  const targets={...draft.plan.targets};
+  if(targets[exercise])targets[replacement]={...targets[exercise],backup:undefined};
+  for(const id of Object.keys(targets)) if(targets[id].backup===replacement)targets[id]={...targets[id],backup:undefined};
+  delete targets[exercise];
+  const plan={...draft.plan,targets,exercises:draft.plan.exercises.map(id=>id===exercise?replacement:id)};
+  void action(async()=>{await persist({...draft,plan});pickLift(replacement);N("Exercise swapped for this workout only.");});
+ }
+ const plannedBackup=draft?.plan.targets?.[exercise]?.backup;
+ const swaps=draft&&library[exercise]?Object.entries(library).filter(([id,item])=>(id===plannedBackup||item.muscles[0]===library[exercise].muscles[0])&&!draft.plan.exercises.includes(id)):[];
  const activeTarget=draft?.plan.targets?.[exercise];
  const suggestion=nextLoad(history,exercise,activeTarget);
  const weightChange=weeklyWeightChange(weighIns);
@@ -184,6 +208,10 @@ export default function Page(){
      <p>Suggested working load: <strong>{suggestion.kg} kg</strong>. {suggestion.reason}</p>
      <Button type="button" variant="outline" className="mt-2" disabled={busy} onClick={()=>K(String(suggestion.kg))}>Use suggested load</Button>
     </aside>}
+    {editingSet===null&&swaps.length>0&&!draft.sets.some(s=>s.exercise===exercise)&&!(removed?.draftId===draft.id&&removed.lift.exercise===exercise)&&
+     <label className="grid gap-1">Swap for this workout<select disabled={busy} value="" onChange={e=>{if(e.target.value)swapExercise(e.target.value);}}>
+      <option value="">Choose a planned backup or same-muscle alternative</option>{swaps.map(([id,item])=><option key={id} value={id}>{item.name} · {item.equipment}{id===plannedBackup?" · Planned backup":""}</option>)}
+     </select></label>}
     <label className="grid gap-1">Set type<select value={extras.kind??"work"} onChange={e=>Extras({...extras,kind:e.target.value as Kind,seconds:undefined,km:undefined})}>
      <option value="work">Working set</option><option value="warmup">Warm-up</option><option value="drop">Drop set</option><option value="timed">Timed</option><option value="cardio">Cardio</option>
     </select></label>
@@ -211,7 +239,7 @@ export default function Page(){
   {screen==="Plans"&&<div className="grid gap-4 sm:grid-cols-2">
    {!edit&&<ExerciseLibrary library={library}/>}
    <ScheduleEditor key={schedule?.id??"manual"} schedule={schedule} plans={plans} disabled={busy||!online} onSave={saveSchedule}/>
-   <section className={box}><h2 className="mb-3 text-xl font-black">Routines</h2>{plans.map(p=><div key={p.id} className="border-b border-white/10 py-3"><p className="font-bold">{p.name}{plan?.id===p.id?" · Selected":""}</p><p className="mb-2 text-sm text-neutral-400">{p.exercises.map(title).join(" · ")}</p><div className="flex gap-2"><Button variant="outline" onClick={()=>{Sel(p.id);Override(true);screenTo("Today");}}>Use plan</Button>{!p.id.startsWith("starter")&&<Button variant="ghost" onClick={()=>Edit(p)}>Edit</Button>}</div></div>)}
+   <section className={box}><h2 className="mb-3 text-xl font-black">Routines</h2>{plans.map(p=><div key={p.id} className="border-b border-white/10 py-3"><p className="font-bold">{p.name}{plan?.id===p.id?" · Selected":""}</p><p className="mb-2 text-sm text-neutral-400">{p.exercises.map(title).join(" · ")}</p><div className="flex gap-2"><Button variant="outline" onClick={()=>{Sel(p.id);Override(true);screenTo("Today");}}>Use plan</Button>{p.id.startsWith("starter")?<Button variant="ghost" onClick={()=>Edit({...p,id:""})}>Customize copy</Button>:<Button variant="ghost" onClick={()=>Edit(p)}>Edit</Button>}</div></div>)}
    <Button className="mt-4" onClick={()=>Edit({id:"",name:"",exercises:[]})}>New plan</Button></section>
    {edit&&<form className={box+" grid gap-3"} onSubmit={savePlan}><h2 className="text-xl font-black">{edit.id?"Edit plan":"New plan"}</h2><label className="grid gap-1">Plan name<input required maxLength={100} value={edit.name} onChange={e=>Edit({...edit,name:e.target.value})}/></label>
     <ExerciseLibrary library={library} selected={edit.exercises} onToggle={id=>{const targets={...edit.targets};const checked=edit.exercises.includes(id);
@@ -220,6 +248,8 @@ export default function Page(){
     }}/>
     {edit.exercises.map(id=><fieldset key={id} className="grid grid-cols-3 gap-2"><legend className="mb-2 font-bold">{title(id)} targets</legend>
      {([["sets","Sets",1,20],["reps","Reps",1,300],["restSeconds","Rest (sec)",0,900]] as const).map(([field,label,min,max])=><label className="grid gap-1 text-sm" key={field}>{label}<input required type="number" min={min} max={max} step="1" value={Number.isNaN(edit.targets?.[id]?.[field])?"":edit.targets?.[id]?.[field]??defaultTarget[field]} onChange={e=>Edit({...edit,targets:{...edit.targets,[id]:{...(edit.targets?.[id]??defaultTarget),[field]:e.target.valueAsNumber}}})}/></label>)}
+     <label className="col-span-3 grid gap-1 text-sm">Superset letter (optional)<input maxLength={1} pattern="[A-Z]" value={edit.targets?.[id]?.group??""} onChange={e=>Edit({...edit,targets:{...edit.targets,[id]:{...(edit.targets?.[id]??defaultTarget),group:e.target.value.toUpperCase()||undefined}}})}/></label>
+     <label className="col-span-3 grid gap-1 text-sm">Planned backup (optional)<select value={edit.exercises.includes(edit.targets?.[id]?.backup??"")?"":edit.targets?.[id]?.backup??""} onChange={e=>Edit({...edit,targets:{...edit.targets,[id]:{...(edit.targets?.[id]??defaultTarget),backup:e.target.value||undefined}}})}><option value="">None</option>{Object.entries(catalog).filter(([key])=>!edit.exercises.includes(key)).map(([key,name])=><option value={key} key={key}>{name}</option>)}</select></label>
     </fieldset>)}
     <div className="flex gap-2"><Button disabled={busy||!online||!edit.exercises.length}>Save plan</Button><Button type="button" variant="ghost" disabled={busy} onClick={()=>Edit(null)}>Cancel</Button></div></form>}
   </div>}
@@ -241,7 +271,7 @@ export default function Page(){
    {weightChange!==null&&<p className="mt-4 text-sm">Change between 7-day averages: {weightChange>0?"+":""}{weightChange.toFixed(2)} kg</p>}
    {orderedWeights.length>0&&<ul className="mt-4 divide-y divide-white/10">{orderedWeights.slice(0,14).map(x=><li className="flex justify-between py-2" key={x.date}><span>{fmt(x.date)}</span><span>{x.kg} kg</span></li>)}</ul>}
    </section>
-   <section className={box}><h2 className="mb-4 text-xl font-black">Workout history</h2><Button className="mb-3" variant="outline" disabled={busy||!online} onClick={()=>void exportData()}>Export training JSON</Button>{history.length?history.map(w=><details key={w.id} className="border-b border-white/10 py-3"><summary className="cursor-pointer font-bold">{w.plan.name} · {fmt(w.finishedAt)} · {w.sets.length} sets</summary><ul className="mt-2 text-sm text-neutral-300">{w.sets.map((s,i)=><li key={i}>{title(s.exercise)} · {describe(s)}</li>)}</ul><Button variant="outline" className="mt-3" disabled={busy} onClick={()=>{Correct(w);WorkoutDate(w.finishedAt.slice(0,10));}}>Correct workout</Button></details>):<p className="text-neutral-400">No completed workouts.</p>}</section>
+   <section className={box}><h2 className="mb-4 text-xl font-black">Workout history</h2><Button className="mb-3" variant="outline" disabled={busy||!online} onClick={()=>void exportData()}>Export training JSON</Button>{!session?.user?.demo&&<label className="mb-4 grid gap-1 text-sm">Import OJAS JSON (up to 64 KiB)<input type="file" accept=".json,application/json" disabled={busy||!online} onChange={e=>{const file=e.currentTarget.files?.[0];e.currentTarget.value="";importData(file);}}/><span className="text-neutral-400">Adds missing routines, workouts, and weigh-ins. Existing data and your schedule stay unchanged.</span></label>}{history.length?history.map(w=><details key={w.id} className="border-b border-white/10 py-3"><summary className="cursor-pointer font-bold">{w.plan.name} · {fmt(w.finishedAt)} · {w.sets.length} sets</summary><ul className="mt-2 text-sm text-neutral-300">{w.sets.map((s,i)=><li key={i}>{title(s.exercise)} · {describe(s)}</li>)}</ul><Button variant="outline" className="mt-3" disabled={busy} onClick={()=>{Correct(w);WorkoutDate(w.finishedAt.slice(0,10));}}>Correct workout</Button></details>):<p className="text-neutral-400">No completed workouts.</p>}</section>
    {correction&&<form className={box+" grid gap-3 sm:col-span-2"} onSubmit={saveCorrection}>
     <h2 className="text-xl font-black">Correct {correction.plan.name}</h2>
     <label className="grid gap-1">Workout date (UTC)<input required type="date" min="1900-01-01" max={new Date().toISOString().slice(0,10)} value={workoutDate} onChange={e=>WorkoutDate(e.target.value)}/></label>

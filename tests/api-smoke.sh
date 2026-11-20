@@ -90,4 +90,18 @@ curl -fsS -b "$tmp/c1" "$url/export" | jq -e '.bodyweight[0].kg==71.8'
 curl -fsS -b "$tmp/c2" "$url/progress" | jq -e '.bodyweight==[]'
 curl -fsS -b "$tmp/c1" "$url/exercises" | jq -e '.exercises as $names | (.library | length==36) and (.library | all(to_entries[]; .value.name==$names[.key] and (.value.muscles|length>0))) and .library["goblet-squat"].equipment=="Dumbbell"'
 curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d '{"name":"Catalog test","exercises":["goblet-squat"]}' "$url/routines" | jq -e '.routine.exercises==["goblet-squat"]'
+curl -fsS -b "$tmp/c1" "$url/routines" | jq -e '.routines | any(.id=="starter-5x5-a" and .targets["barbell-row"].sets==5) and any(.id=="starter-5x5-b" and .targets.deadlift.sets==1)'
+backup=$(curl -fsS -b "$tmp/c1" "$url/export")
+import_backup() {
+ curl -sS -o "$tmp/response" -w '%{http_code}' -b "$tmp/c2" -H "X-CSRF-Token: $csrf2" -H 'Content-Type: application/json' -d "$1" "$url/import"
+}
+[[ $(import_backup "$(jq '.workouts[0].finishedAt="2024-02-30T00:00:00+00:00"' <<< "$backup")") == 422 ]]
+curl -fsS -b "$tmp/c2" "$url/export" | jq -e '.workouts==[] and .routines==[] and .bodyweight==[]'
+[[ $(import_backup "$backup") == 200 ]]
+jq -e '.added>0 and .skipped==0' "$tmp/response"
+[[ $(import_backup "$backup") == 200 ]]
+jq -e '.added==0 and .skipped>0' "$tmp/response"
+curl -fsS -b "$tmp/c2" "$url/export" | jq -e '.schedule==null and (.workouts|length>0) and .bodyweight[0].kg==71.8'
+advanced=$(jq '.targets.row += {group:"A",backup:"barbell-row"}' <<< "$routine_payload")
+curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d "$advanced" "$url/routines" | jq -e '.routine.targets.row.group=="A" and .routine.targets.row.backup=="barbell-row"'
 echo "API smoke checks passed"

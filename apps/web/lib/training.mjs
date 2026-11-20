@@ -80,3 +80,17 @@ export function muscleWorkouts(history, library, since) {
   }
   return [...result.values()].sort((a,b)=>b.sets-a.sets||a.muscle.localeCompare(b.muscle));
 }
+
+export function nextSupersetExercise(plan, exercise, sets) {
+  const group=plan.targets?.[exercise]?.group;
+  if(!group) return null;
+  const members=plan.exercises.filter(id=>plan.targets?.[id]?.group===group);
+  if(members.length<2) return null;
+  const i=members.indexOf(exercise);
+  for(let offset=1;offset<members.length;offset++){
+    const id=members[(i+offset)%members.length];
+    const count=sets.filter(s=>s.exercise===id&&(!s.kind||s.kind==="work")).length;
+    if(count<plan.targets[id].sets)return id;
+  }
+  return null;
+}

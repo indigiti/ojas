@@ -34,3 +34,9 @@ Exercise discovery: a first-party 36-entry catalog supports name, equipment and 
 Keep the remaining implementation on the existing integration PR rather than opening a PR per feature. Green CI verifies the current changes, not parity. The final gate includes the remaining checklist, media rights, native validation, and an Apache/PHP deployment without a Node server.
 
 The web progress screen now summarizes seven days of working/drop sets, external load volume and last-trained dates by primary muscle. This is not an anatomical map or a recovery prediction.
+
+Built-in 5×5 A/B prescriptions and customizable copies are available in this integration. A workout can substitute a same-primary-muscle alternative before logging that exercise, preserving the slot targets without changing the source routine. Preassigned backups and mid-exercise substitutions are not implemented.
+
+The integration adds non-destructive version-1 OJAS JSON import for routines, workouts and weigh-ins (up to 64 KiB, not external formats or schedule restoration). It also adds an install manifest and a public offline fallback; authenticated cold-start and conflict-aware sync are not implemented. The service worker never caches API or account responses.
+
+Routine targets now support a planned backup and a superset letter. Working sets guide exercise selection among unfinished members sharing a letter, without changing rest timers. Substitutions are still pre-set only. This does not claim full openGym parity.

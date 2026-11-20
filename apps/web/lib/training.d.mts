@@ -10,3 +10,5 @@ export function nextLoad(history:{sets:(Lift & {kind?:string})[]}[],exercise:str
 export function weeklyWeightChange(entries:{date:string;kg:number}[]):number|null;
 
 export function muscleWorkouts(history:{finishedAt:string;sets:(Lift & {kind?:string})[]}[],library:Record<string,{muscles:string[]}>,since:number):{muscle:string;sets:number;kgReps:number;last:number}[];
+
+export function nextSupersetExercise(plan:{exercises:string[];targets?:Record<string,{sets:number;group?:string}>},exercise:string,sets:{exercise:string;kind?:string}[]):string|null;

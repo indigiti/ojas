@@ -5,6 +5,10 @@ test -f apps/web/out/index.html
 grep -Fq '/ojas/_next/' apps/web/out/index.html
 mkdir -p release/public release/private/build
 cp -a apps/web/out/. release/public/
+version=$(sha256sum release/public/sw.js release/public/offline.html | sha256sum | cut -c1-16)
+sed -i "s/__BUILD__/$version/g" release/public/sw.js
+node --check release/public/sw.js
+test -f release/public/manifest.webmanifest
 cp deploy/digiops/.htaccess release/public/
 mkdir -p release/public/api/v1
 cp deploy/digiops/ojas-api.php release/public/api/v1/index.php
