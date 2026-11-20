@@ -26,6 +26,7 @@ try {
     define('OJAS_DEPLOY_DATA_DIR', $runtime);
     define('OJAS_DEPLOY_API_PREFIX', $prefix);
     define('OJAS_DEPLOY_API_ROUTE', $route);
+    define('OJAS_STAGING_DEMO', strtolower($_SERVER['HTTP_HOST'] ?? '') === 'stage.digiti.in');
     require $entry;
 } catch (Throwable $e) {
     error_log('OJAS gateway: ' . $e->getMessage());

@@ -4,8 +4,8 @@ import { get, set, del } from "idb-keyval";
 import { Activity, ArrowRight, CalendarDays, Dumbbell, ListChecks, LogOut, Timer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-type User = {id:string;email:string};
-type Session = {user:User|null;csrf:string};
+type User = {id:string;email?:string;demo?:boolean};
+type Session = {user:User|null;csrf:string;demoAvailable?:boolean};
 type Plan = {id:string;name:string;exercises:string[]};
 type Lift = {exercise:string;kg:number;reps:number};
 type Draft = {id:string;plan:Plan;sets:Lift[];restUntil:number;pending:boolean};
@@ -66,7 +66,10 @@ export default function Page(){
  function login(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=new FormData(e.currentTarget);void action(async()=>{
   const s=session||await api<Session>("/me");S(await api<Session>("/auth/login","POST",{email:f.get("email"),password:f.get("password")},s.csrf));screenTo("Today");
  });}
- function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);S(null);D(null);P([]);H([]);C({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
+ function demo(){void action(async()=>{
+  const s=await api<Session>("/me");S(await api<Session>("/auth/demo","POST",{},s.csrf));screenTo("Today");
+ });}
+ function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);if(session.user?.demo)void del(key).catch(()=>{});S(null);D(null);P([]);H([]);C({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
  function savePlan(e:FormEvent){e.preventDefault();if(!edit||!session)return;void action(async()=>{
   const {routine}=await api<{routine:Plan}>(edit.id?"/routines/"+edit.id:"/routines",edit.id?"PATCH":"POST",edit,session.csrf);
   P(p=>p.some(x=>x.id===routine.id)?p.map(x=>x.id===routine.id?routine:x):[...p,routine]);Sel(routine.id);Edit(null);
@@ -81,12 +84,14 @@ export default function Page(){
    <div><p className="text-xl font-black tracking-widest">OJAS</p><p className="text-xs text-neutral-400">Strength training log</p></div></div>
    {uid&&<Button variant="ghost" onClick={logout} disabled={busy} aria-label="Sign out"><LogOut size={18}/> <span className="hidden sm:inline">Sign out</span></Button>}
   </header>
+  {session?.user?.demo&&<p className="mb-4 rounded-xl border border-lime-300/30 p-3 text-sm">Staging demo · Temporary session. Workouts and plans are not saved to a pilot account.</p>}
   {!online&&<p role="status" className="mb-4 rounded-xl border border-amber-400/40 p-3 text-amber-200">Offline · Active workout changes stay on this device.</p>}
   {notice&&<p role="status" className="mb-4 rounded-xl border border-lime-300/30 p-3">{notice}</p>}
   {!ready?<p role="status">Connecting…</p>:!uid?<section className={box+" mx-auto max-w-md"}><p className="text-sm font-bold text-lime-300">INVITE-ONLY PILOT</p><h1 className="mt-2 text-3xl font-black">Sign in to train</h1>
    <form className="mt-6 grid gap-4" onSubmit={login}><label className="grid gap-1">Email<input name="email" type="email" required autoComplete="username"/></label>
    <label className="grid gap-1">Password<input name="password" type="password" required autoComplete="current-password"/></label>
-   <Button disabled={busy||!online}>Sign in <ArrowRight size={17}/></Button></form></section>:<>
+   <Button disabled={busy||!online}>Sign in <ArrowRight size={17}/></Button></form>
+   {session?.demoAvailable&&<div className="mt-5 grid gap-2 border-t border-white/10 pt-5"><Button type="button" variant="outline" disabled={busy||!online} onClick={demo}>Try staging demo</Button><p className="text-center text-xs text-neutral-400">No password needed. Demo data expires after 30 minutes or on sign-out.</p></div>}</section>:<>
   <h1 className="mb-5 text-4xl font-black tracking-tight sm:text-5xl">{screen}</h1>
   {screen==="Today"&&<div className="grid gap-4 sm:grid-cols-2">
    <section className={box+" bg-gradient-to-br from-lime-950 to-neutral-900"}><p className="text-xs font-bold uppercase tracking-widest text-lime-300">Next session</p>

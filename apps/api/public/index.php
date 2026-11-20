@@ -40,11 +40,28 @@ try {
     session_name($local ? 'ojas_local' : '__Secure-ojas');
     session_set_cookie_params(['path'=>$base.'/','secure'=>!$local,'httponly'=>true,'samesite'=>'Strict']);
     if (!session_start()) throw new RuntimeException('Session unavailable');
+    $demoEnabled = defined('OJAS_STAGING_DEMO') && OJAS_STAGING_DEMO;
+    if (!empty($_SESSION['user']['demo']) && (!$demoEnabled || ($_SESSION['demoUntil'] ?? 0) <= time())) {
+        $_SESSION=[];
+        if (!session_regenerate_id(true)) throw new RuntimeException('Session reset failed');
+    }
     $_SESSION['csrf'] ??= bin2hex(random_bytes(32));
     if ($method==='GET' && $path==='/me') {
-        respond(200,['user'=>$_SESSION['user'] ?? null,'csrf'=>$_SESSION['csrf']]);
+        respond(200,['user'=>$_SESSION['user'] ?? null,'csrf'=>$_SESSION['csrf'],'demoAvailable'=>$demoEnabled]);
     }
     if ($method!=='GET' && !hash_equals($_SESSION['csrf'],$_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) respond(403,['error'=>'Refresh your session and try again']);
+    if ($method==='POST' && $path==='/auth/demo') {
+        if (!$demoEnabled) respond(404,['error'=>'Endpoint not found']);
+        if (!empty($_SESSION['user'])) respond(409,['error'=>'Sign out before starting a demo']);
+        if (!session_regenerate_id(true)) throw new RuntimeException('Session reset failed');
+        $_SESSION=[
+            'user'=>['id'=>'demo_'.bin2hex(random_bytes(16)), 'demo'=>true],
+            'csrf'=>bin2hex(random_bytes(32)),
+            'demoUntil'=>time()+1800,
+            'demoData'=>['routines'=>[], 'workouts'=>[]],
+        ];
+        respond(200,['user'=>$_SESSION['user'],'csrf'=>$_SESSION['csrf'],'demoAvailable'=>true]);
+    }
     if ($method==='POST' && $path==='/auth/login') {
         $x=body();
         $email=is_string($x['email'] ?? null) ? strtolower(trim($x['email'])) : '';
@@ -76,15 +93,25 @@ try {
         setcookie(session_name(),'', ['expires'=>1,'path'=>$base.'/','secure'=>!$local,'httponly'=>true,'samesite'=>'Strict']);
         respond(200,['ok'=>true]);
     }
-    session_write_close();
-    $key='user_'.$user['id'];
+    $isDemo=!empty($user['demo']);
+    if (!$isDemo) session_write_close();
+    $userStore=static function (?callable $change=null) use ($user,$isDemo): array {
+        if (!$isDemo) return store('user_'.$user['id'],$change);
+        $data=$_SESSION['demoData'];
+        if ($change) {
+            $data=$change($data);
+            if (count($data['routines'])>10 || count($data['workouts'])>20) respond(422,['error'=>'Demo storage limit reached. Sign out to start a fresh demo.']);
+            $_SESSION['demoData']=$data;
+        }
+        return $data;
+    };
     $starter=['id'=>'starter','name'=>'Full Body A','exercises'=>['squat','bench','row']];
     if ($method==='GET' && $path==='/exercises') respond(200,['exercises'=>$catalog]);
-    if ($method==='GET' && $path==='/routines') respond(200,['routines'=>array_merge([$starter],array_values(store($key)['routines'] ?? []))]);
+    if ($method==='GET' && $path==='/routines') respond(200,['routines'=>array_merge([$starter],array_values($userStore()['routines'] ?? []))]);
     if (($method==='POST' && $path==='/routines') || ($method==='PATCH' && preg_match('~^/routines/([a-f0-9]{32})$~D',$path,$match))) {
         $new=routine(body(),$catalog);
         $new['id']=$match[1] ?? bin2hex(random_bytes(16));
-        store($key,function($d) use ($new,$method) {
+        $userStore(function($d) use ($new,$method) {
             if ($method==='PATCH' && !isset($d['routines'][$new['id']])) respond(404,['error'=>'Plan not found']);
             $d['routines'][$new['id']]=$new;
             return $d;
@@ -92,7 +119,7 @@ try {
         respond($method==='POST'?201:200,['routine'=>$new]);
     }
     if ($method==='GET' && in_array($path,['/workouts','/progress'],true)) {
-        $sessions=array_reverse(array_values(store($key)['workouts'] ?? []));
+        $sessions=array_reverse(array_values($userStore()['workouts'] ?? []));
         respond(200,['workouts'=>$sessions]);
     }
     if ($method==='POST' && $path==='/workouts') {
@@ -112,7 +139,7 @@ try {
         $payload=['id'=>$id,'plan'=>$plan,'sets'=>$clean];
         $fingerprint=hash('sha256',json_encode($payload,JSON_THROW_ON_ERROR|JSON_PRESERVE_ZERO_FRACTION));
         $status=201;
-        $d=store($key,function($d) use($id,$payload,$fingerprint,&$status) {
+        $d=$userStore(function($d) use($id,$payload,$fingerprint,&$status) {
             if (isset($d['workouts'][$id])) {
                 if ($d['workouts'][$id]['fingerprint']!==$fingerprint) respond(409,['error'=>'This workout ID already has different sets']);
                 $status=200;
