@@ -28,6 +28,19 @@ function routine(array $x, array $catalog): array {
     if (count(array_unique($exercises)) !== count($exercises)) respond(422,['error'=>'Duplicate exercise']);
     return ['name'=>$name,'exercises'=>$exercises];
 }
+function workout_sets(mixed $sets, array $plan): array {
+        if (!is_array($sets) || !array_is_list($sets) || count($sets)<1 || count($sets)>120) respond(422,['error'=>'Log 1–120 sets']);
+        $clean=[];
+        foreach ($sets as $s) {
+            if (!is_array($s)) respond(422,['error'=>'Invalid set']);
+            $e=$s['exercise'] ?? null; $w=$s['kg'] ?? null; $n=$s['reps'] ?? null;
+            if (!in_array($e,$plan['exercises'],true) || !(is_int($w)||is_float($w)) || !is_finite($w) || $w<0 || $w>1000 || !is_int($n) || $n<1 || $n>300)
+                respond(422,['error'=>'Invalid exercise, weight or reps']);
+            $clean[]=['exercise'=>$e,'kg'=>(float)$w,'reps'=>$n];
+        }
+    return $clean;
+}
+
 try {
     $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
     $base = defined('OJAS_DEPLOY_API_PREFIX') ? OJAS_DEPLOY_API_PREFIX : rtrim(getenv('OJAS_API_PREFIX') ?: '/api/v1','/');
@@ -128,22 +141,36 @@ try {
     }
     if ($method==='GET' && in_array($path,['/workouts','/progress'],true)) {
         $sessions=array_reverse(array_values($userStore()['workouts'] ?? []));
+        usort($sessions,static fn($a,$b)=>strcmp($b['finishedAt'],$a['finishedAt']));
         respond(200,['workouts'=>$sessions]);
+    }
+    if ($method==='PATCH' && preg_match('~^/workouts/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$~D',$path,$match)) {
+        $id=$match[1];
+        $x=body();
+        $date=$x['date'] ?? null;
+        $revision=$x['revision'] ?? null;
+        if (!is_string($date) || !preg_match('/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/D',$date,$parts)
+            || !checkdate((int)$parts[2],(int)$parts[3],(int)$parts[1])
+            || $date<'1900-01-01' || $date>gmdate('Y-m-d') || !is_int($revision) || $revision<0)
+            respond(422,['error'=>'Use a valid UTC workout date and revision']);
+        $d=$userStore(static function($d) use($id,$x,$date,$revision) {
+            $w=$d['workouts'][$id] ?? null;
+            if (!$w) respond(404,['error'=>'Workout not found']);
+            if (($w['revision'] ?? 0)!==$revision) respond(409,['error'=>'Workout changed. Reopen it before editing.']);
+            $w['sets']=workout_sets($x['sets'] ?? null,$w['plan']);
+            $w['finishedAt']=$date.substr($w['finishedAt'],10);
+            $w['revision']=$revision+1;
+            $d['workouts'][$id]=$w;
+            return $d;
+        });
+        respond(200,['workout'=>$d['workouts'][$id]]);
     }
     if ($method==='POST' && $path==='/workouts') {
         $x=body();
         $id=$x['id'] ?? null;
         if (!is_string($id) || !preg_match('/\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/',$id)) respond(422,['error'=>'Invalid workout ID']);
         $plan=is_array($x['plan'] ?? null) ? routine($x['plan'],$catalog) : routine([],$catalog);
-        $sets=$x['sets'] ?? null;
-        if (!is_array($sets) || !array_is_list($sets) || count($sets)<1 || count($sets)>120) respond(422,['error'=>'Log 1–120 sets']);
-        $clean=[];
-        foreach ($sets as $s) {
-            $e=$s['exercise'] ?? null; $w=$s['kg'] ?? null; $n=$s['reps'] ?? null;
-            if (!in_array($e,$plan['exercises'],true) || !(is_int($w)||is_float($w)) || !is_finite($w) || $w<0 || $w>1000 || !is_int($n) || $n<1 || $n>300)
-                respond(422,['error'=>'Invalid exercise, weight or reps']);
-            $clean[]=['exercise'=>$e,'kg'=>(float)$w,'reps'=>$n];
-        }
+        $clean=workout_sets($x['sets'] ?? null,$plan);
         $payload=['id'=>$id,'plan'=>$plan,'sets'=>$clean];
         $fingerprint=hash('sha256',json_encode($payload,JSON_THROW_ON_ERROR|JSON_PRESERVE_ZERO_FRACTION));
         $status=201;

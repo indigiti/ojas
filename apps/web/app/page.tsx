@@ -10,7 +10,7 @@ type Session = {user:User|null;csrf:string;demoAvailable?:boolean};
 type Plan = {id:string;name:string;exercises:string[]};
 type Lift = {exercise:string;kg:number;reps:number};
 type Draft = {id:string;plan:Plan;sets:Lift[];restUntil:number;pending:boolean;restSeconds?:number};
-type Workout = {id:string;plan:Plan;sets:Lift[];finishedAt:string};
+type Workout = {id:string;plan:Plan;sets:Lift[];finishedAt:string;revision?:number};
 const prefix = (process.env.NEXT_PUBLIC_BASE_PATH || "") + "/api/v1";
 const links = [{label:"Today",icon:CalendarDays},{label:"Workout",icon:Dumbbell},{label:"Plans",icon:ListChecks},{label:"Progress",icon:Activity}] as const;
 type Screen = typeof links[number]["label"];
@@ -26,7 +26,7 @@ async function api<T>(path:string, method="GET", payload?:unknown, csrf?:string)
  return data;
 }
 const err=(e:unknown)=>e instanceof Error?e.message:"Something went wrong";
-const fmt=(x:string)=>new Date(x).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"});
+const fmt=(x:string)=>new Date(x).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric",timeZone:"UTC"});
 export default function Page(){
  const [session,S]=useState<Session|null>(null), [screen,screenTo]=useState<Screen>("Today");
  const [catalog,C]=useState<Record<string,string>>({}), [plans,P]=useState<Plan[]>([]), [history,H]=useState<Workout[]>([]);
@@ -35,6 +35,8 @@ export default function Page(){
  const [ready,R]=useState(false), [kg,K]=useState(""), [reps,Reps]=useState(""), [storageOK,Safe]=useState(false);
  const [editingSet,SetEditing]=useState<number|null>(null);
  const [removed,Removed]=useState<{draftId:string;index:number;lift:Lift}|null>(null);
+ const [correction,Correct]=useState<Workout|null>(null);
+ const [workoutDate,WorkoutDate]=useState("");
  const uid=session?.user?.id;
  const key="ojas:draft:"+uid;
  const title=(id:string)=>catalog[id]||id;
@@ -79,7 +81,7 @@ export default function Page(){
  function demo(){void action(async()=>{
   const s=await api<Session>("/me");S(await api<Session>("/auth/demo","POST",{},s.csrf));screenTo("Today");
  });}
- function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);if(session.user?.demo)void del(key).catch(()=>{});S(null);D(null);SetEditing(null);Removed(null);P([]);H([]);C({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
+ function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);if(session.user?.demo)void del(key).catch(()=>{});S(null);D(null);Correct(null);SetEditing(null);Removed(null);P([]);H([]);C({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
  function savePlan(e:FormEvent){e.preventDefault();if(!edit||!session)return;void action(async()=>{
   const {routine}=await api<{routine:Plan}>(edit.id?"/routines/"+edit.id:"/routines",edit.id?"PATCH":"POST",edit,session.csrf);
   P(p=>p.some(x=>x.id===routine.id)?p.map(x=>x.id===routine.id?routine:x):[...p,routine]);Sel(routine.id);Edit(null);
@@ -88,6 +90,14 @@ export default function Page(){
  function changeSets(sets:Lift[],after?:()=>void){
   if(!draft||draft.pending||busy||sets.length>120)return;
   void action(async()=>{await persist({...draft,sets});SetEditing(null);after?.();});
+ }
+ function saveCorrection(e:FormEvent){
+  e.preventDefault();if(!correction||!session)return;
+  void action(async()=>{
+   const {workout}=await api<{workout:Workout}>("/workouts/"+correction.id,"PATCH",{date:workoutDate,revision:correction.revision??0,sets:correction.sets},session.csrf);
+   H(h=>h.map(w=>w.id===workout.id?workout:w).sort((a,b)=>b.finishedAt.localeCompare(a.finishedAt)));
+   Correct(null);N("Workout updated.");
+  });
  }
  const personalBest=history.flatMap(w=>w.sets).filter(s=>s.exercise===trend).sort((a,b)=>recordKey(b)-recordKey(a))[0];
  const rest=Math.max(0,Math.ceil(((draft?.restUntil||0)-now)/1000));
@@ -133,7 +143,7 @@ export default function Page(){
      <Button variant="ghost" disabled={busy||draft.sets.length>=120} aria-label={"Copy set "+(i+1)} onClick={()=>changeSets([...draft.sets,s])}>Copy</Button>
      <Button variant="ghost" disabled={busy} aria-label={"Remove set "+(i+1)} onClick={()=>changeSets(draft.sets.filter((_,j)=>j!==i),()=>Removed({draftId:draft.id,index:i,lift:s}))}>Remove</Button>
     </div>}</li>)}</ul>
-   {removed?.draftId===draft.id&&!draft.pending&&<Button className="mb-4" variant="outline" disabled={busy||draft.sets.length>=120} onClick={()=>{const sets=[...draft.sets];sets.splice(removed.index,0,removed.lift);changeSets(sets,()=>Removed(null));}}>Undo removal</Button>
+   {removed?.draftId===draft.id&&!draft.pending&&<Button className="mb-4" variant="outline" disabled={busy||draft.sets.length>=120} onClick={()=>{const sets=[...draft.sets];sets.splice(removed.index,0,removed.lift);changeSets(sets,()=>Removed(null));}}>Undo removal</Button>}
    <div className="flex flex-wrap gap-2"><Button disabled={busy||!draft.sets.length||(draft.pending&&!online)} onClick={finish}>{draft.pending?"Retry save":"Finish workout"}</Button>
    {!draft.pending&&<Button variant="outline" disabled={busy} onClick={()=>{if(window.confirm("Discard this workout and its unsaved sets?"))void action(async()=>{await del(key);D(null);screenTo("Today");});}}>Discard</Button>}</div>
   </section>:<section className={box}><p className="mb-4">No active workout.</p><Button onClick={()=>screenTo("Today")}>Go to Today</Button></section>)}
@@ -147,7 +157,16 @@ export default function Page(){
   {screen==="Progress"&&<div className="grid gap-4 sm:grid-cols-2"><section className={box}><h2 className="mb-4 text-xl font-black">Top set by session</h2><label className="grid gap-1">Exercise<select value={trend} onChange={e=>Trend(e.target.value)}>{Object.entries(catalog).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
    {personalBest&&<p className="mt-3 text-sm text-lime-300">Heaviest logged set: {personalBest.kg} kg × {personalBest.reps}</p>}
    {points.length?<ol className="mt-4 grid gap-3">{points.map(p=><li key={p.id}><div className="flex justify-between text-sm"><span>{fmt(p.date)}</span><span>{p.top.kg} kg × {p.top.reps}</span></div><div className="mt-1 h-2 rounded-full bg-neutral-700"><div aria-hidden className="h-2 rounded-full bg-lime-300" style={{width:(p.top.kg/max*100)+"%"}}/></div></li>)}</ol>:<p className="mt-4 text-neutral-400">No logged sets for this exercise.</p>}</section>
-   <section className={box}><h2 className="mb-4 text-xl font-black">Workout history</h2>{history.length?history.map(w=><details key={w.id} className="border-b border-white/10 py-3"><summary className="cursor-pointer font-bold">{w.plan.name} · {fmt(w.finishedAt)} · {w.sets.length} sets</summary><ul className="mt-2 text-sm text-neutral-300">{w.sets.map((s,i)=><li key={i}>{title(s.exercise)} · {s.kg} kg × {s.reps}</li>)}</ul></details>):<p className="text-neutral-400">No completed workouts.</p>}</section></div>}
+   <section className={box}><h2 className="mb-4 text-xl font-black">Workout history</h2>{history.length?history.map(w=><details key={w.id} className="border-b border-white/10 py-3"><summary className="cursor-pointer font-bold">{w.plan.name} · {fmt(w.finishedAt)} · {w.sets.length} sets</summary><ul className="mt-2 text-sm text-neutral-300">{w.sets.map((s,i)=><li key={i}>{title(s.exercise)} · {s.kg} kg × {s.reps}</li>)}</ul><Button variant="outline" className="mt-3" disabled={busy} onClick={()=>{Correct(w);WorkoutDate(w.finishedAt.slice(0,10));}}>Correct workout</Button></details>):<p className="text-neutral-400">No completed workouts.</p>}</section>
+   {correction&&<form className={box+" grid gap-3 sm:col-span-2"} onSubmit={saveCorrection}>
+    <h2 className="text-xl font-black">Correct {correction.plan.name}</h2>
+    <label className="grid gap-1">Workout date (UTC)<input required type="date" min="1900-01-01" max={new Date().toISOString().slice(0,10)} value={workoutDate} onChange={e=>WorkoutDate(e.target.value)}/></label>
+    {correction.sets.map((s,i)=><fieldset className="grid grid-cols-2 gap-3" key={i}><legend>{i+1}. {title(s.exercise)}</legend>
+     <label className="grid gap-1">Weight (kg)<input required type="number" min="0" max="1000" step="any" value={Number.isNaN(s.kg)?"":s.kg} onChange={e=>{const kg=e.target.valueAsNumber;Correct(c=>c?{...c,sets:c.sets.map((x,j)=>i===j?{...x,kg}:x)}:c);}}/></label>
+     <label className="grid gap-1">Reps<input required type="number" min="1" max="300" step="1" value={Number.isNaN(s.reps)?"":s.reps} onChange={e=>{const reps=e.target.valueAsNumber;Correct(c=>c?{...c,sets:c.sets.map((x,j)=>i===j?{...x,reps}:x)}:c);}}/></label>
+    </fieldset>)}
+    <div className="flex flex-wrap gap-2"><Button disabled={busy||!online}>Save correction</Button><Button type="button" variant="outline" disabled={busy} onClick={()=>Correct(null)}>Cancel</Button></div>
+   </form>}</div>}
   <nav aria-label="App navigation" className="fixed inset-x-0 bottom-0 z-10 border-t border-white/10 bg-neutral-950/95 pb-[env(safe-area-inset-bottom)]"><div className="mx-auto grid max-w-2xl grid-cols-4">{links.map(({label,icon:Icon})=><button type="button" key={label} aria-current={screen===label?"page":undefined} onClick={()=>screenTo(label)} className={"flex min-h-16 cursor-pointer flex-col items-center justify-center gap-1 text-xs font-bold "+(screen===label?"text-lime-300":"text-neutral-400 hover:text-white")}><Icon size={21}/>{label}</button>)}</div></nav>
   </>}
  </main>;

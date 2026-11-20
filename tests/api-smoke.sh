@@ -32,4 +32,16 @@ curl -fsS -b "$tmp/c1" "$url/progress" | jq -e '.workouts | length==1'
 curl -fsS -b "$tmp/c2" "$url/progress" | jq -e '.workouts | length==0'
 plan=$(curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d '{"name":"Private plan","exercises":["row"]}' "$url/routines" | jq -er .routine.id)
 [[ $(curl -sS -o /dev/null -w '%{http_code}' -b "$tmp/c2" -H "X-CSRF-Token: $csrf2" -H 'Content-Type: application/json' -X PATCH -d '{"name":"Attempt","exercises":["row"]}' "$url/routines/$plan") == 404 ]]
+workout="$url/workouts/12345678-abcd-4321-abcd-123456789abc"
+correction='{"date":"2024-01-02","revision":0,"sets":[{"exercise":"squat","kg":37.5,"reps":9}]}'
+edit_workout() {
+  curl -sS -o "$tmp/response" -w '%{http_code}' -b "$2" -H "X-CSRF-Token: $3" -H 'Content-Type: application/json' -X PATCH -d "$1" "$workout"
+}
+[[ $(edit_workout "$correction" "$tmp/c2" "$csrf2") == 404 ]]
+[[ $(edit_workout "$(jq '.date="2024-02-30"' <<< "$correction")" "$tmp/c1" "$csrf") == 422 ]]
+[[ $(edit_workout "$correction" "$tmp/c1" "$csrf") == 200 ]]
+jq -e '.workout.revision==1 and (.workout.finishedAt|startswith("2024-01-02")) and .workout.sets[0].kg==37.5' "$tmp/response"
+[[ $(edit_workout "$correction" "$tmp/c1" "$csrf") == 409 ]]
+[[ $(post "$data") == 200 ]]
+jq -e '.workout.sets[0].reps==9' "$tmp/response"
 echo "API smoke checks passed"
