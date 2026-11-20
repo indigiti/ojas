@@ -2,7 +2,7 @@ name: OJAS staging
 on:
   pull_request:
   push:
-    branches: [main, 'feat/staging-pilot']
+    branches: [main]
 permissions:
   contents: read
 jobs:
@@ -24,19 +24,22 @@ jobs:
         run: python3 -m py_compile services/coach/main.py
       - name: Build static web app
         working-directory: apps/web
+        env:
+          NEXT_PUBLIC_BASE_PATH: /ojas
         run: |
           npm install --no-audit --no-fund
           npm run build
           test -f out/index.html
-      - name: Package stage bundle
-        run: |
-          mkdir -p staging
-          cp -R apps/web/out staging/web
-          cp -R apps/api staging/api
-          cp docs/STAGING.md staging/
-          tar -czf ojas-staging.tar.gz -C staging .
-      - uses: actions/upload-artifact@v4
+      - name: Package DigiOps release
+        run: bash deploy/digiops/package.sh
+      - name: Smoke-test packaged release under Apache
+        run: bash tests/digiops-smoke.sh
+      - name: Upload DigiOps release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
         with:
-          name: ojas-staging
-          path: ojas-staging.tar.gz
+          name: digiops-release
+          path: release/
+          include-hidden-files: true
           if-no-files-found: error
+          retention-days: 30
