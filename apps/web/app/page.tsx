@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { get, set, del } from "idb-keyval";
 import { Activity, ArrowRight, CalendarDays, Dumbbell, ListChecks, LogOut, Timer } from "lucide-react";
 import { recordKey, isWeightRecord, volume } from "@/lib/training.mjs";
+import { ScheduleEditor, type Schedule } from "@/components/schedule-editor";
 import { Button } from "@/components/ui/button";
 
 type User = {id:string;email?:string;demo?:boolean};
@@ -11,7 +12,8 @@ type Target = {sets:number;reps:number;restSeconds:number};
 type Plan = {id:string;name:string;exercises:string[];targets?:Record<string,Target>};
 const defaultTarget:Target={sets:3,reps:8,restSeconds:90};
 type Lift = {exercise:string;kg:number;reps:number};
-type Draft = {id:string;plan:Plan;sets:Lift[];restUntil:number;pending:boolean;restSeconds?:number};
+type Rotation = {id:string;step:number;planId:string};
+type Draft = {id:string;plan:Plan;sets:Lift[];restUntil:number;pending:boolean;restSeconds?:number;rotation?:Rotation};
 type Workout = {id:string;plan:Plan;sets:Lift[];finishedAt:string;revision?:number};
 const prefix = (process.env.NEXT_PUBLIC_BASE_PATH || "") + "/api/v1";
 const links = [{label:"Today",icon:CalendarDays},{label:"Workout",icon:Dumbbell},{label:"Plans",icon:ListChecks},{label:"Progress",icon:Activity}] as const;
@@ -39,12 +41,14 @@ export default function Page(){
  const [removed,Removed]=useState<{draftId:string;index:number;lift:Lift}|null>(null);
  const [correction,Correct]=useState<Workout|null>(null);
  const [workoutDate,WorkoutDate]=useState("");
+ const [schedule,ScheduleState]=useState<Schedule|null>(null);
+ const [override,Override]=useState(false);
  const uid=session?.user?.id;
  const key="ojas:draft:"+uid;
  const title=(id:string)=>catalog[id]||id;
  async function refresh(){
-  const [c,p,h]=await Promise.all([api<{exercises:Record<string,string>}>("/exercises"),api<{routines:Plan[]}>("/routines"),api<{workouts:Workout[]}>("/progress")]);
-  C(c.exercises);P(p.routines);H(h.workouts);Trend(t=>t||Object.keys(c.exercises)[0]||"");
+  const [c,p,h,s]=await Promise.all([api<{exercises:Record<string,string>}>("/exercises"),api<{routines:Plan[]}>("/routines"),api<{workouts:Workout[]}>("/progress"),api<{schedule:Schedule|null}>("/schedule")]);
+  ScheduleState(s.schedule);C(c.exercises);P(p.routines);H(h.workouts);Trend(t=>t||Object.keys(c.exercises)[0]||"");
  }
  useEffect(()=>{api<Session>("/me").then(S).catch(e=>N(err(e))).finally(()=>R(true));
   const check=()=>On(navigator.onLine);check();window.addEventListener("online",check);window.addEventListener("offline",check);
@@ -59,7 +63,7 @@ export default function Page(){
   SetEditing(null);E(id);const last=[...(draft?.sets||[])].reverse().find(s=>s.exercise===id)||history.flatMap(w=>[...w.sets].reverse()).find(s=>s.exercise===id);
   K(last?String(last.kg):"");Reps(last?String(last.reps):"");
  }
- function start(plan:Plan){void action(async()=>{if(draft||!storageOK)return;await persist({id:crypto.randomUUID(),plan,sets:[],restUntil:0,pending:false});Removed(null);pickLift(plan.exercises[0]);screenTo("Workout");});}
+ function start(plan:Plan,rotation?:Rotation){void action(async()=>{if(draft||!storageOK)return;await persist({id:crypto.randomUUID(),plan,sets:[],restUntil:0,pending:false,rotation});Removed(null);pickLift(plan.exercises[0]);screenTo("Workout");});}
  function log(e:FormEvent){e.preventDefault();if(!draft||draft.pending||!draft.plan.exercises.includes(exercise))return;const w=Number(kg),n=Number(reps);
   if(kg===""||!Number.isFinite(w)||w<0||w>1000||!Number.isInteger(n)||n<1||n>300||(editingSet===null&&draft.sets.length>=120)){N("Enter 0–1,000 kg and 1–300 reps; maximum 120 sets.");return;}
   void action(async()=>{
@@ -74,8 +78,8 @@ export default function Page(){
   SetEditing(null);Removed(null);
   const pending={...draft,pending:true};await persist(pending);
   if(!navigator.onLine){N("Workout saved on this device. Reconnect and tap Retry save.");return;}
-  const saved=await api<{workout:Workout}>("/workouts","POST",{id:pending.id,plan:pending.plan,sets:pending.sets},session.csrf);
-  await del(key);D(null);H(h=>[saved.workout,...h.filter(w=>w.id!==saved.workout.id)]);screenTo("Progress");N("Workout saved.");
+  const saved=await api<{workout:Workout;schedule:Schedule|null}>("/workouts","POST",{id:pending.id,plan:pending.plan,sets:pending.sets,rotation:pending.rotation},session.csrf);
+  await del(key);D(null);ScheduleState(saved.schedule);Override(false);H(h=>[saved.workout,...h.filter(w=>w.id!==saved.workout.id)]);screenTo("Progress");N("Workout saved.");
  });}
  function login(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=new FormData(e.currentTarget);void action(async()=>{
   const s=session||await api<Session>("/me");S(await api<Session>("/auth/login","POST",{email:f.get("email"),password:f.get("password")},s.csrf));screenTo("Today");
@@ -83,12 +87,20 @@ export default function Page(){
  function demo(){void action(async()=>{
   const s=await api<Session>("/me");S(await api<Session>("/auth/demo","POST",{},s.csrf));screenTo("Today");
  });}
- function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);if(session.user?.demo)void del(key).catch(()=>{});S(null);D(null);Correct(null);SetEditing(null);Removed(null);P([]);H([]);C({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
+ function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);if(session.user?.demo)void del(key).catch(()=>{});S(null);D(null);ScheduleState(null);Override(false);Correct(null);SetEditing(null);Removed(null);P([]);H([]);C({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
  function savePlan(e:FormEvent){e.preventDefault();if(!edit||!session)return;void action(async()=>{
   const {routine}=await api<{routine:Plan}>(edit.id?"/routines/"+edit.id:"/routines",edit.id?"PATCH":"POST",{...edit,targets:Object.fromEntries(edit.exercises.map(id=>[id,edit.targets?.[id]??defaultTarget]))},session.csrf);
   P(p=>p.some(x=>x.id===routine.id)?p.map(x=>x.id===routine.id?routine:x):[...p,routine]);Sel(routine.id);Edit(null);
  });}
- const plan=plans.find(p=>p.id===selected)||plans[0];
+ const usesSchedule=!override&&schedule!==null&&schedule.mode!=="manual";
+ const scheduledId=schedule?.mode==="weekly"?schedule.slots[(new Date(now).getDay()+6)%7]:
+  schedule?.mode==="rotation"?schedule.slots[schedule.step%schedule.slots.length]:null;
+ const plan=usesSchedule?plans.find(p=>p.id===scheduledId):plans.find(p=>p.id===selected)||plans[0];
+ const restDay=usesSchedule&&schedule?.mode==="weekly"&&!scheduledId;
+ function saveSchedule(mode:Schedule["mode"],slots:(string|null)[]){
+  if(!session)return;
+  void action(async()=>{const result=await api<{schedule:Schedule}>("/schedule","PUT",{mode,slots},session.csrf);ScheduleState(result.schedule);Override(false);N("Schedule saved.");});
+ }
  function changeSets(sets:Lift[],after?:()=>void){
   if(!draft||draft.pending||busy||sets.length>120)return;
   void action(async()=>{await persist({...draft,sets});SetEditing(null);after?.();});
@@ -123,9 +135,9 @@ export default function Page(){
   <h1 className="mb-5 text-4xl font-black tracking-tight sm:text-5xl">{screen}</h1>
   {screen==="Today"&&<div className="grid gap-4 sm:grid-cols-2">
    <section className={box+" bg-gradient-to-br from-lime-950 to-neutral-900"}><p className="text-xs font-bold uppercase tracking-widest text-lime-300">Next session</p>
-    <h2 className="my-3 text-2xl font-black">{draft?.plan.name||plan?.name||"Choose a plan"}</h2>
-    <p className="mb-5 text-neutral-300">{draft?draft.sets.length+" sets logged":plan?.exercises.map(title).join(" · ")||"Pick a routine to get started."}</p>
-    {draft?<Button onClick={()=>screenTo("Workout")}>{draft.pending?"Resume saving":"Resume workout"}</Button>:<Button disabled={busy||!storageOK} onClick={()=>plan?start(plan):screenTo("Plans")}>{plan?"Start workout":"Browse plans"}<ArrowRight size={17}/></Button>}
+    <h2 className="my-3 text-2xl font-black">{draft?.plan.name||plan?.name||(restDay?"Rest day":"Choose a plan")}</h2>
+    <p className="mb-5 text-neutral-300">{draft?draft.sets.length+" sets logged":plan?.exercises.map(title).join(" · ")||(restDay?"No routine is scheduled for today.":"Pick a routine to get started.")}</p>
+    {draft?<Button onClick={()=>screenTo("Workout")}>{draft.pending?"Resume saving":"Resume workout"}</Button>:<Button disabled={busy||!storageOK} onClick={()=>plan?start(plan,usesSchedule&&schedule?.mode==="rotation"?{id:schedule.id,step:schedule.step,planId:plan.id}:undefined):screenTo("Plans")}>{plan?"Start workout":"Browse plans"}<ArrowRight size={17}/></Button>}
    </section><section className={box}><p className="text-xs font-bold uppercase tracking-widest text-neutral-400">Last session</p><h2 className="my-3 text-2xl font-black">{history[0]?.plan.name||"No workouts yet"}</h2><p className="text-neutral-300">{history[0]?fmt(history[0].finishedAt)+" · "+history[0].sets.length+" sets":"Finish a workout to see it here."}</p></section></div>}
   {screen==="Workout"&&(draft?<section className={box}><div className="mb-5 flex flex-wrap items-center justify-between gap-2"><h2 className="text-2xl font-black">{draft.plan.name}</h2><span className="flex items-center gap-2 rounded-full bg-lime-950 px-3 py-1 text-lime-300"><Timer size={16}/>{rest?Math.floor(rest/60)+":"+String(rest%60).padStart(2,"0"):"Ready"}</span></div>
    {!draft.pending&&<div className="mb-4 flex flex-wrap items-end gap-3">
@@ -153,7 +165,8 @@ export default function Page(){
    {!draft.pending&&<Button variant="outline" disabled={busy} onClick={()=>{if(window.confirm("Discard this workout and its unsaved sets?"))void action(async()=>{await del(key);D(null);screenTo("Today");});}}>Discard</Button>}</div>
   </section>:<section className={box}><p className="mb-4">No active workout.</p><Button onClick={()=>screenTo("Today")}>Go to Today</Button></section>)}
   {screen==="Plans"&&<div className="grid gap-4 sm:grid-cols-2">
-   <section className={box}><h2 className="mb-3 text-xl font-black">Routines</h2>{plans.map(p=><div key={p.id} className="border-b border-white/10 py-3"><p className="font-bold">{p.name}{plan?.id===p.id?" · Selected":""}</p><p className="mb-2 text-sm text-neutral-400">{p.exercises.map(title).join(" · ")}</p><div className="flex gap-2"><Button variant="outline" onClick={()=>{Sel(p.id);screenTo("Today");}}>Use plan</Button>{!p.id.startsWith("starter")&&<Button variant="ghost" onClick={()=>Edit(p)}>Edit</Button>}</div></div>)}
+   <ScheduleEditor key={schedule?.id??"manual"} schedule={schedule} plans={plans} disabled={busy||!online} onSave={saveSchedule}/>
+   <section className={box}><h2 className="mb-3 text-xl font-black">Routines</h2>{plans.map(p=><div key={p.id} className="border-b border-white/10 py-3"><p className="font-bold">{p.name}{plan?.id===p.id?" · Selected":""}</p><p className="mb-2 text-sm text-neutral-400">{p.exercises.map(title).join(" · ")}</p><div className="flex gap-2"><Button variant="outline" onClick={()=>{Sel(p.id);Override(true);screenTo("Today");}}>Use plan</Button>{!p.id.startsWith("starter")&&<Button variant="ghost" onClick={()=>Edit(p)}>Edit</Button>}</div></div>)}
    <Button className="mt-4" onClick={()=>Edit({id:"",name:"",exercises:[]})}>New plan</Button></section>
    {edit&&<form className={box+" grid gap-3"} onSubmit={savePlan}><h2 className="text-xl font-black">{edit.id?"Edit plan":"New plan"}</h2><label className="grid gap-1">Plan name<input required maxLength={100} value={edit.name} onChange={e=>Edit({...edit,name:e.target.value})}/></label>
     <fieldset><legend className="mb-2">Exercises</legend>{Object.entries(catalog).map(([id,name])=><label key={id} className="flex min-h-10 items-center gap-2"><input type="checkbox" checked={edit.exercises.includes(id)} onChange={e=>{const targets={...edit.targets};if(e.target.checked)targets[id]={...defaultTarget};else delete targets[id];Edit({...edit,targets,exercises:e.target.checked?[...edit.exercises,id]:edit.exercises.filter(x=>x!==id)});}}/>{name}</label>)}</fieldset>

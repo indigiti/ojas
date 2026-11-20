@@ -133,7 +133,7 @@ try {
         }
         return $data;
     };
-    // Templates are exercise lists; set prescriptions are not stored yet.
+    // Built-in templates remain usable without prescriptions.
     $starters=[
         ['id'=>'starter','name'=>'Full Body A','exercises'=>['squat','bench','row']],
         ['id'=>'starter-push','name'=>'Push','exercises'=>['bench','press','pushup']],
@@ -142,6 +142,30 @@ try {
         ['id'=>'starter-upper','name'=>'Upper Body','exercises'=>['bench','row','press','pulldown']],
         ['id'=>'starter-lower','name'=>'Lower Body','exercises'=>['squat','deadlift','split']],
     ];
+    if ($method==='GET' && $path==='/schedule') {
+        respond(200,['schedule'=>$userStore()['schedule'] ?? null]);
+    }
+    if ($method==='PUT' && $path==='/schedule') {
+        $x=body();
+        $mode=$x['mode'] ?? null;
+        $slots=$x['slots'] ?? null;
+        if (!in_array($mode,['manual','weekly','rotation'],true) || !is_array($slots) || !array_is_list($slots)
+            || ($mode==='manual' && count($slots)!==0) || ($mode==='weekly' && count($slots)!==7)
+            || ($mode==='rotation' && (count($slots)<1 || count($slots)>12)))
+            respond(422,['error'=>'Invalid schedule']);
+        $d=$userStore(static function($d) use ($mode,$slots,$starters) {
+            $ids=array_merge(array_column($starters,'id'),array_keys($d['routines'] ?? []));
+            foreach ($slots as $slot) {
+                if ($slot===null && $mode==='weekly') continue;
+                if (!is_string($slot) || !in_array($slot,$ids,true)) respond(422,['error'=>'Choose an available routine']);
+            }
+            $previous=$d['schedule'] ?? null;
+            if (($previous['mode'] ?? null)===$mode && $previous['slots']===$slots) return $d;
+            $d['schedule']=['mode'=>$mode,'slots'=>$slots,'id'=>bin2hex(random_bytes(16)),'step'=>0];
+            return $d;
+        });
+        respond(200,['schedule'=>$d['schedule']]);
+    }
     if ($method==='GET' && $path==='/exercises') respond(200,['exercises'=>$catalog]);
     if ($method==='GET' && $path==='/routines') respond(200,['routines'=>array_merge($starters,array_values($userStore()['routines'] ?? []))]);
     if (($method==='POST' && $path==='/routines') || ($method==='PATCH' && preg_match('~^/routines/([a-f0-9]{32})$~D',$path,$match))) {
@@ -187,6 +211,13 @@ try {
         $plan=is_array($x['plan'] ?? null) ? routine($x['plan'],$catalog) : routine([],$catalog);
         $clean=workout_sets($x['sets'] ?? null,$plan);
         $payload=['id'=>$id,'plan'=>$plan,'sets'=>$clean];
+        if (array_key_exists('rotation',$x)) {
+            $rotation=$x['rotation'];
+            if (!is_array($rotation) || !is_string($rotation['id'] ?? null) || !preg_match('/^[a-f0-9]{32}$/D',$rotation['id'])
+                || !is_int($rotation['step'] ?? null) || $rotation['step']<0
+                || !is_string($rotation['planId'] ?? null) || strlen($rotation['planId'])>32) respond(422,['error'=>'Invalid rotation reference']);
+            $payload['rotation']=['id'=>$rotation['id'],'step'=>$rotation['step'],'planId'=>$rotation['planId']];
+        }
         $fingerprint=hash('sha256',json_encode($payload,JSON_THROW_ON_ERROR|JSON_PRESERVE_ZERO_FRACTION));
         $status=201;
         $d=$userStore(function($d) use($id,$payload,$fingerprint,&$status) {
@@ -194,11 +225,17 @@ try {
                 if ($d['workouts'][$id]['fingerprint']!==$fingerprint) respond(409,['error'=>'This workout ID already has different sets']);
                 $status=200;
             } else {
+                $rotation=$payload['rotation'] ?? null;
+                $schedule=$d['schedule'] ?? null;
+                if ($rotation && ($schedule['mode'] ?? null)==='rotation' && $schedule['id']===$rotation['id']
+                    && $schedule['step']===$rotation['step'] && $schedule['slots'][$schedule['step'] % count($schedule['slots'])]===$rotation['planId']) {
+                    $d['schedule']['step']++;
+                }
                 $d['workouts'][$id]=$payload+['finishedAt'=>gmdate(DATE_ATOM),'fingerprint'=>$fingerprint];
             }
             return $d;
         });
-        respond($status,['workout'=>$d['workouts'][$id]]);
+        respond($status,['workout'=>$d['workouts'][$id],'schedule'=>$d['schedule'] ?? null]);
     }
     respond(404,['error'=>'Endpoint not found']);
 } catch (Throwable $e) {

@@ -49,4 +49,25 @@ curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/js
 curl -fsS -b "$tmp/c1" "$url/routines" | jq -e '.routines | any(.name=="Prescribed" and .targets.row.sets==3)'
 invalid=$(jq '.targets.row.restSeconds=901' <<< "$routine_payload")
 [[ $(curl -sS -o /dev/null -w '%{http_code}' -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d "$invalid" "$url/routines") == 422 ]]
+put_schedule() {
+ curl -sS -o "$tmp/response" -w '%{http_code}' -b "$1" -H "X-CSRF-Token: $2" -H 'Content-Type: application/json' -X PUT -d "$3" "$url/schedule"
+}
+weekly='{"mode":"weekly","slots":["starter",null,null,null,null,null,null]}'
+[[ $(put_schedule "$tmp/c1" "$csrf" "$weekly") == 200 ]]
+jq -e '.schedule.slots[0]=="starter" and .schedule.slots[1]==null' "$tmp/response"
+curl -fsS -b "$tmp/c2" "$url/schedule" | jq -e '.schedule==null'
+foreign=$(jq -nc --arg plan "$plan" '{mode:"rotation",slots:[$plan]}')
+[[ $(put_schedule "$tmp/c2" "$csrf2" "$foreign") == 422 ]]
+rotation='{"mode":"rotation","slots":["starter","starter-push"]}'
+[[ $(put_schedule "$tmp/c1" "$csrf" "$rotation") == 200 ]]
+sid=$(jq -er .schedule.id "$tmp/response")
+payload=$(jq --arg sid "$sid" '.id="22345678-abcd-4321-abcd-123456789abc" | .rotation={id:$sid,step:0,planId:"starter"}' <<< "$data")
+[[ $(post "$payload") == 201 ]]
+jq -e '.schedule.step==1' "$tmp/response"
+[[ $(post "$payload") == 200 ]]
+jq -e '.schedule.step==1' "$tmp/response"
+[[ $(post "$(jq '.id="32345678-abcd-4321-abcd-123456789abc"' <<< "$payload")") == 201 ]]
+jq -e '.schedule.step==1' "$tmp/response"
+[[ $(put_schedule "$tmp/c1" "$csrf" "$rotation") == 200 ]]
+jq -e --arg sid "$sid" '.schedule.step==1 and .schedule.id==$sid' "$tmp/response"
 echo "API smoke checks passed"
