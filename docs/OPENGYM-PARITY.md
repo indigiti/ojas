@@ -36,3 +36,5 @@ Keep the remaining implementation on the existing integration PR rather than ope
 The web progress screen now summarizes seven days of working/drop sets, external load volume and last-trained dates by primary muscle. This is not an anatomical map or a recovery prediction.
 
 Built-in 5×5 A/B prescriptions and customizable copies are available in this integration. A workout can substitute a same-primary-muscle alternative before logging that exercise, preserving the slot targets without changing the source routine. Preassigned backups and mid-exercise substitutions are not implemented.
+
+The integration adds non-destructive version-1 OJAS JSON import for routines, workouts and weigh-ins (up to 64 KiB, not external formats or schedule restoration). It also adds an install manifest and a public offline fallback; authenticated cold-start and conflict-aware sync are not implemented. The service worker never caches API or account responses.

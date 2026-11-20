@@ -190,6 +190,58 @@ try {
         });
         respond(200,['entry'=>$d['bodyweight'][$date]]);
     }
+    if ($method==='POST' && $path==='/import') {
+        if ($isDemo) respond(403,['error'=>'Import is disabled in the temporary demo']);
+        $x=body();
+        if (($x['version'] ?? null)!==1) respond(422,['error'=>'Select an OJAS version 1 JSON export']);
+        $incoming=[];
+        foreach (['routines','workouts','bodyweight'] as $key) {
+            $rows=$x[$key] ?? [];
+            if (!is_array($rows) || !array_is_list($rows) || count($rows)>500) respond(422,['error'=>'Invalid import list: '.$key]);
+            $incoming[$key]=[];
+            foreach ($rows as $row) {
+                if (!is_array($row)) respond(422,['error'=>'Invalid import entry']);
+                $id=$row['id'] ?? null;
+                if ($key==='routines') {
+                    if (!is_string($id) || !preg_match('/^[a-f0-9]{32}$/D',$id)) respond(422,['error'=>'Invalid routine ID']);
+                    $clean=routine($row,$catalog)+['id'=>$id];
+                } elseif ($key==='workouts') {
+                    $stamp=$row['finishedAt'] ?? null;
+                    if (!is_string($id) || !preg_match('/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/D',$id)
+                        || !is_string($stamp) || !preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|\+00:00)$/D',$stamp))
+                        respond(422,['error'=>'Invalid workout ID or timestamp']);
+                    $normalized=substr($stamp,0,19).'+00:00';
+                    $dt=DateTimeImmutable::createFromFormat(DATE_ATOM,$normalized);
+                    if (!$dt || $dt->format(DATE_ATOM)!==$normalized || $dt->getTimestamp()>time())
+                        respond(422,['error'=>'Invalid workout timestamp']);
+                    $plan=routine(is_array($row['plan'] ?? null)?$row['plan']:[],$catalog);
+                    $payload=['id'=>$id,'plan'=>$plan,'sets'=>workout_sets($row['sets'] ?? null,$plan)];
+                    $clean=$payload+['finishedAt'=>$normalized,'revision'=>0,
+                        'fingerprint'=>hash('sha256',json_encode($payload,JSON_THROW_ON_ERROR|JSON_PRESERVE_ZERO_FRACTION))];
+                } else {
+                    $id=$row['date'] ?? null;
+                    $kg=$row['kg'] ?? null;
+                    if (!is_string($id) || !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/D',$id,$parts)
+                        || !checkdate((int)$parts[2],(int)$parts[3],(int)$parts[1]) || $id<'1900-01-01' || $id>gmdate('Y-m-d')
+                        || !(is_int($kg)||is_float($kg)) || !is_finite($kg) || $kg<1 || $kg>1000)
+                        respond(422,['error'=>'Invalid bodyweight entry']);
+                    $clean=['date'=>$id,'kg'=>round($kg,2)];
+                }
+                if (isset($incoming[$key][$id])) respond(422,['error'=>'Duplicate entry in import file']);
+                $incoming[$key][$id]=$clean;
+            }
+        }
+        $added=0; $skipped=0;
+        $userStore(static function($d) use($incoming,&$added,&$skipped) {
+            foreach ($incoming as $key=>$entries) foreach ($entries as $id=>$entry) {
+                if (isset($d[$key][$id])) { $skipped++; continue; }
+                $d[$key][$id]=$entry; $added++;
+            }
+            if (count($d['bodyweight'] ?? [])>36600) respond(422,['error'=>'Weigh-in limit reached']);
+            return $d;
+        });
+        respond(200,['added'=>$added,'skipped'=>$skipped]);
+    }
     if ($method==='GET' && $path==='/export') {
         $d=$userStore();
         $workouts=array_values($d['workouts'] ?? []);

@@ -134,6 +134,15 @@ export default function Page(){
    WeighIns(entries=>[...entries.filter(x=>x.date!==entry.date),entry]);WeighKg("");N("Weigh-in saved.");
   });
  }
+ function importData(file?:File){
+  if(!file||!session||session.user?.demo)return;
+  void action(async()=>{
+   if(file.size>65536)throw new Error("The pilot accepts OJAS JSON files up to 64 KiB.");
+   const parsed:unknown=JSON.parse(await file.text());
+   const result=await api<{added:number;skipped:number}>("/import","POST",parsed,session.csrf);
+   await refresh();N("Import complete: "+result.added+" added, "+result.skipped+" existing entries kept.");
+  });
+ }
  async function exportData(){
   await action(async()=>{const data=await api("/export");const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));
    const link=document.createElement("a");link.href=url;link.download="ojas-training.json";link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -256,7 +265,7 @@ export default function Page(){
    {weightChange!==null&&<p className="mt-4 text-sm">Change between 7-day averages: {weightChange>0?"+":""}{weightChange.toFixed(2)} kg</p>}
    {orderedWeights.length>0&&<ul className="mt-4 divide-y divide-white/10">{orderedWeights.slice(0,14).map(x=><li className="flex justify-between py-2" key={x.date}><span>{fmt(x.date)}</span><span>{x.kg} kg</span></li>)}</ul>}
    </section>
-   <section className={box}><h2 className="mb-4 text-xl font-black">Workout history</h2><Button className="mb-3" variant="outline" disabled={busy||!online} onClick={()=>void exportData()}>Export training JSON</Button>{history.length?history.map(w=><details key={w.id} className="border-b border-white/10 py-3"><summary className="cursor-pointer font-bold">{w.plan.name} · {fmt(w.finishedAt)} · {w.sets.length} sets</summary><ul className="mt-2 text-sm text-neutral-300">{w.sets.map((s,i)=><li key={i}>{title(s.exercise)} · {describe(s)}</li>)}</ul><Button variant="outline" className="mt-3" disabled={busy} onClick={()=>{Correct(w);WorkoutDate(w.finishedAt.slice(0,10));}}>Correct workout</Button></details>):<p className="text-neutral-400">No completed workouts.</p>}</section>
+   <section className={box}><h2 className="mb-4 text-xl font-black">Workout history</h2><Button className="mb-3" variant="outline" disabled={busy||!online} onClick={()=>void exportData()}>Export training JSON</Button>{!session?.user?.demo&&<label className="mb-4 grid gap-1 text-sm">Import OJAS JSON (up to 64 KiB)<input type="file" accept=".json,application/json" disabled={busy||!online} onChange={e=>{const file=e.currentTarget.files?.[0];e.currentTarget.value="";importData(file);}}/><span className="text-neutral-400">Adds missing routines, workouts, and weigh-ins. Existing data and your schedule stay unchanged.</span></label>}{history.length?history.map(w=><details key={w.id} className="border-b border-white/10 py-3"><summary className="cursor-pointer font-bold">{w.plan.name} · {fmt(w.finishedAt)} · {w.sets.length} sets</summary><ul className="mt-2 text-sm text-neutral-300">{w.sets.map((s,i)=><li key={i}>{title(s.exercise)} · {describe(s)}</li>)}</ul><Button variant="outline" className="mt-3" disabled={busy} onClick={()=>{Correct(w);WorkoutDate(w.finishedAt.slice(0,10));}}>Correct workout</Button></details>):<p className="text-neutral-400">No completed workouts.</p>}</section>
    {correction&&<form className={box+" grid gap-3 sm:col-span-2"} onSubmit={saveCorrection}>
     <h2 className="text-xl font-black">Correct {correction.plan.name}</h2>
     <label className="grid gap-1">Workout date (UTC)<input required type="date" min="1900-01-01" max={new Date().toISOString().slice(0,10)} value={workoutDate} onChange={e=>WorkoutDate(e.target.value)}/></label>
