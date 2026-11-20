@@ -1,0 +1,42 @@
+name: OJAS staging
+on:
+  pull_request:
+  push:
+    branches: [main, 'feat/staging-pilot']
+permissions:
+  contents: read
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+      - name: PHP syntax and API integration tests
+        run: |
+          find apps/api -name '*.php' -print0 | xargs -0 -n1 php -l
+          bash tests/api-smoke.sh
+      - name: Validate Python syntax
+        run: python3 -m py_compile services/coach/main.py
+      - name: Build static web app
+        working-directory: apps/web
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          test -f out/index.html
+      - name: Package stage bundle
+        run: |
+          mkdir -p staging
+          cp -R apps/web/out staging/web
+          cp -R apps/api staging/api
+          cp docs/STAGING.md staging/
+          tar -czf ojas-staging.tar.gz -C staging .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ojas-staging
+          path: ojas-staging.tar.gz
+          if-no-files-found: error
