@@ -107,4 +107,13 @@ curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/js
 [[ $(curl -sS -o /dev/null -w '%{http_code}' "$url/photos") == 401 ]]
 [[ $(curl -sS -o /dev/null -w '%{http_code}' -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d '{"jpeg":"bad"}' "$url/photos") == 422 ]]
 curl -fsS -b "$tmp/c1" "$url/photos" | jq -e '.photos==[]'
+jpeg='/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAACAAIDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AL+AD//Z'
+photo=$(curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d "$(jq -nc --arg jpeg "$jpeg" '{jpeg:$jpeg}')" "$url/photos" | jq -er .id)
+curl -fsS -b "$tmp/c1" "$url/photos/$photo" | jq -e --arg jpeg "$jpeg" '.jpeg==$jpeg'
+curl -fsS -b "$tmp/c1" "$url/photos" | jq -e --arg id "$photo" '.photos[0].id==$id and (.photos[0]|has("jpeg")|not)'
+[[ $(curl -sS -o /dev/null -w '%{http_code}' -b "$tmp/c2" "$url/photos/$photo") == 404 ]]
+curl -fsS -b "$tmp/c2" -H "X-CSRF-Token: $csrf2" -X DELETE "$url/photos/$photo" | jq -e .ok
+[[ $(curl -sS -o /dev/null -w '%{http_code}' -b "$tmp/c1" "$url/photos/$photo") == 200 ]]
+curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -X DELETE "$url/photos/$photo" | jq -e .ok
+[[ $(curl -sS -o /dev/null -w '%{http_code}' -b "$tmp/c1" "$url/photos/$photo") == 404 ]]
 echo "API smoke checks passed"
