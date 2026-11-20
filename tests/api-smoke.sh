@@ -44,4 +44,9 @@ jq -e '.workout.revision==1 and (.workout.finishedAt|startswith("2024-01-02")) a
 [[ $(edit_workout "$correction" "$tmp/c1" "$csrf") == 409 ]]
 [[ $(post "$data") == 200 ]]
 jq -e '.workout.sets[0].reps==9' "$tmp/response"
+routine_payload='{"name":"Prescribed","exercises":["row"],"targets":{"row":{"sets":3,"reps":8,"restSeconds":0}}}'
+curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d "$routine_payload" "$url/routines" | jq -e '.routine.targets.row == {sets:3,reps:8,restSeconds:0}'
+curl -fsS -b "$tmp/c1" "$url/routines" | jq -e '.routines | any(.name=="Prescribed" and .targets.row.sets==3)'
+invalid=$(jq '.targets.row.restSeconds=901' <<< "$routine_payload")
+[[ $(curl -sS -o /dev/null -w '%{http_code}' -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d "$invalid" "$url/routines") == 422 ]]
 echo "API smoke checks passed"

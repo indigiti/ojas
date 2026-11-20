@@ -26,7 +26,22 @@ function routine(array $x, array $catalog): array {
         respond(422,['error'=>'Enter a plan name and 1–12 exercises']);
     foreach ($exercises as $e) if (!is_string($e) || !isset($catalog[$e])) respond(422,['error'=>'Unknown exercise']);
     if (count(array_unique($exercises)) !== count($exercises)) respond(422,['error'=>'Duplicate exercise']);
-    return ['name'=>$name,'exercises'=>$exercises];
+    $plan=['name'=>$name,'exercises'=>$exercises];
+    $targets=$x['targets'] ?? [];
+    if (!is_array($targets) || count($targets)>count($exercises)) respond(422,['error'=>'Invalid exercise targets']);
+    foreach ($targets as $id=>$target) {
+        if (!in_array($id,$exercises,true) || !is_array($target)) respond(422,['error'=>'Target must match a plan exercise']);
+    }
+    // Normalize by exercise order so reordered JSON keys do not affect retry fingerprints.
+    foreach ($exercises as $id) {
+        if (!isset($targets[$id])) continue;
+        $item=$targets[$id];
+        $sets=$item['sets'] ?? null; $reps=$item['reps'] ?? null; $rest=$item['restSeconds'] ?? null;
+        if (!is_int($sets) || $sets<1 || $sets>20 || !is_int($reps) || $reps<1 || $reps>300
+            || !is_int($rest) || $rest<0 || $rest>900) respond(422,['error'=>'Targets must be 1–20 sets, 1–300 reps, and 0–900 seconds of rest']);
+        $plan['targets'][$id]=['sets'=>$sets,'reps'=>$reps,'restSeconds'=>$rest];
+    }
+    return $plan;
 }
 function workout_sets(mixed $sets, array $plan): array {
         if (!is_array($sets) || !array_is_list($sets) || count($sets)<1 || count($sets)>120) respond(422,['error'=>'Log 1–120 sets']);

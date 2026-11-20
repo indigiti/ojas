@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 
 type User = {id:string;email?:string;demo?:boolean};
 type Session = {user:User|null;csrf:string;demoAvailable?:boolean};
-type Plan = {id:string;name:string;exercises:string[]};
+type Target = {sets:number;reps:number;restSeconds:number};
+type Plan = {id:string;name:string;exercises:string[];targets?:Record<string,Target>};
+const defaultTarget:Target={sets:3,reps:8,restSeconds:90};
 type Lift = {exercise:string;kg:number;reps:number};
 type Draft = {id:string;plan:Plan;sets:Lift[];restUntil:number;pending:boolean;restSeconds?:number};
 type Workout = {id:string;plan:Plan;sets:Lift[];finishedAt:string;revision?:number};
@@ -57,13 +59,13 @@ export default function Page(){
   SetEditing(null);E(id);const last=[...(draft?.sets||[])].reverse().find(s=>s.exercise===id)||history.flatMap(w=>[...w.sets].reverse()).find(s=>s.exercise===id);
   K(last?String(last.kg):"");Reps(last?String(last.reps):"");
  }
- function start(plan:Plan){void action(async()=>{if(draft||!storageOK)return;await persist({id:crypto.randomUUID(),plan,sets:[],restUntil:0,pending:false,restSeconds:90});Removed(null);pickLift(plan.exercises[0]);screenTo("Workout");});}
+ function start(plan:Plan){void action(async()=>{if(draft||!storageOK)return;await persist({id:crypto.randomUUID(),plan,sets:[],restUntil:0,pending:false});Removed(null);pickLift(plan.exercises[0]);screenTo("Workout");});}
  function log(e:FormEvent){e.preventDefault();if(!draft||draft.pending||!draft.plan.exercises.includes(exercise))return;const w=Number(kg),n=Number(reps);
   if(kg===""||!Number.isFinite(w)||w<0||w>1000||!Number.isInteger(n)||n<1||n>300||(editingSet===null&&draft.sets.length>=120)){N("Enter 0–1,000 kg and 1–300 reps; maximum 120 sets.");return;}
   void action(async()=>{
    const lift={exercise,kg:w,reps:n}, t=Date.now();
    const sets=editingSet===null?[...draft.sets,lift]:draft.sets.map((s,i)=>i===editingSet?lift:s);
-   await persist({...draft,sets,restUntil:editingSet===null?t+(draft.restSeconds??90)*1000:draft.restUntil});
+   await persist({...draft,sets,restUntil:editingSet===null?t+(draft.restSeconds??draft.plan.targets?.[exercise]?.restSeconds??90)*1000:draft.restUntil});
    SetEditing(null);Now(t);
    if(editingSet===null&&isWeightRecord(lift,history.flatMap(x=>x.sets).concat(draft.sets)))N("New weight best · "+title(exercise));
   });
@@ -83,7 +85,7 @@ export default function Page(){
  });}
  function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);if(session.user?.demo)void del(key).catch(()=>{});S(null);D(null);Correct(null);SetEditing(null);Removed(null);P([]);H([]);C({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
  function savePlan(e:FormEvent){e.preventDefault();if(!edit||!session)return;void action(async()=>{
-  const {routine}=await api<{routine:Plan}>(edit.id?"/routines/"+edit.id:"/routines",edit.id?"PATCH":"POST",edit,session.csrf);
+  const {routine}=await api<{routine:Plan}>(edit.id?"/routines/"+edit.id:"/routines",edit.id?"PATCH":"POST",{...edit,targets:Object.fromEntries(edit.exercises.map(id=>[id,edit.targets?.[id]??defaultTarget]))},session.csrf);
   P(p=>p.some(x=>x.id===routine.id)?p.map(x=>x.id===routine.id?routine:x):[...p,routine]);Sel(routine.id);Edit(null);
  });}
  const plan=plans.find(p=>p.id===selected)||plans[0];
@@ -100,6 +102,7 @@ export default function Page(){
   });
  }
  const personalBest=history.flatMap(w=>w.sets).filter(s=>s.exercise===trend).sort((a,b)=>recordKey(b)-recordKey(a))[0];
+ const activeTarget=draft?.plan.targets?.[exercise];
  const rest=Math.max(0,Math.ceil(((draft?.restUntil||0)-now)/1000));
  const points=history.filter(w=>w.sets.some(s=>s.exercise===trend)).slice(0,10).reverse().map(w=>({id:w.id,date:w.finishedAt,top:w.sets.filter(s=>s.exercise===trend).reduce((a,b)=>b.kg>a.kg||(b.kg===a.kg&&b.reps>a.reps)?b:a)}));
  const max=Math.max(1,...points.map(p=>p.top.kg));
@@ -127,7 +130,8 @@ export default function Page(){
   {screen==="Workout"&&(draft?<section className={box}><div className="mb-5 flex flex-wrap items-center justify-between gap-2"><h2 className="text-2xl font-black">{draft.plan.name}</h2><span className="flex items-center gap-2 rounded-full bg-lime-950 px-3 py-1 text-lime-300"><Timer size={16}/>{rest?Math.floor(rest/60)+":"+String(rest%60).padStart(2,"0"):"Ready"}</span></div>
    {!draft.pending&&<div className="mb-4 flex flex-wrap items-end gap-3">
     <label className="grid gap-1 text-sm">Rest after next set
-     <select disabled={busy} value={draft.restSeconds??90} onChange={e=>{const seconds=Number(e.target.value);void action(async()=>persist({...draft,restSeconds:seconds}));}}>
+     <select disabled={busy} value={draft.restSeconds??"plan"} onChange={e=>{const seconds=e.target.value==="plan"?undefined:Number(e.target.value);void action(async()=>persist({...draft,restSeconds:seconds}));}}>
+      <option value="plan">Use plan ({activeTarget?.restSeconds??90} sec)</option>
       {[0,30,45,60,90,120,180,300,600,900].map(n=><option key={n} value={n}>{n?n+" sec":"Off"}</option>)}
      </select>
     </label>
@@ -135,6 +139,7 @@ export default function Page(){
     <p className="text-sm text-neutral-400">Session volume: {volume(draft.sets).toLocaleString(undefined,{maximumFractionDigits:2})} kg</p>
    </div>}
    {draft.pending?<p className="mb-4 text-amber-200">Completion pending. Retry the same save once connected.</p>:<form className="mb-5 grid gap-3" onSubmit={log}><label className="grid gap-1">Exercise<select disabled={editingSet!==null} value={exercise} onChange={e=>pickLift(e.target.value)}>{draft.plan.exercises.map(x=><option key={x} value={x}>{title(x)}</option>)}</select></label>
+    {activeTarget&&<p className="text-sm text-lime-300">Target: {activeTarget.sets} sets × {activeTarget.reps} reps · {draft.sets.filter(s=>s.exercise===exercise).length} sets logged</p>}
     <div className="grid grid-cols-2 gap-3"><label className="grid gap-1">Weight (kg)<input inputMode="decimal" type="number" min="0" max="1000" step="any" required value={kg} onChange={e=>K(e.target.value)}/></label><label className="grid gap-1">Reps<input inputMode="numeric" type="number" min="1" max="300" step="1" required value={reps} onChange={e=>Reps(e.target.value)}/></label></div>
     <div className="flex flex-wrap gap-2"><Button disabled={busy}>{editingSet===null?"Log set":"Save set changes"}</Button>{editingSet!==null&&<Button type="button" variant="outline" disabled={busy} onClick={()=>pickLift(exercise)}>Cancel edit</Button>}</div></form>}
    <ul className="mb-5 divide-y divide-white/10">{draft.sets.map((s,i)=><li key={i} className="flex flex-wrap items-center justify-between gap-2 py-2"><span>{i+1}. {title(s.exercise)} · {s.kg} kg × {s.reps}</span>
@@ -151,7 +156,10 @@ export default function Page(){
    <section className={box}><h2 className="mb-3 text-xl font-black">Routines</h2>{plans.map(p=><div key={p.id} className="border-b border-white/10 py-3"><p className="font-bold">{p.name}{plan?.id===p.id?" · Selected":""}</p><p className="mb-2 text-sm text-neutral-400">{p.exercises.map(title).join(" · ")}</p><div className="flex gap-2"><Button variant="outline" onClick={()=>{Sel(p.id);screenTo("Today");}}>Use plan</Button>{!p.id.startsWith("starter")&&<Button variant="ghost" onClick={()=>Edit(p)}>Edit</Button>}</div></div>)}
    <Button className="mt-4" onClick={()=>Edit({id:"",name:"",exercises:[]})}>New plan</Button></section>
    {edit&&<form className={box+" grid gap-3"} onSubmit={savePlan}><h2 className="text-xl font-black">{edit.id?"Edit plan":"New plan"}</h2><label className="grid gap-1">Plan name<input required maxLength={100} value={edit.name} onChange={e=>Edit({...edit,name:e.target.value})}/></label>
-    <fieldset><legend className="mb-2">Exercises</legend>{Object.entries(catalog).map(([id,name])=><label key={id} className="flex min-h-10 items-center gap-2"><input type="checkbox" checked={edit.exercises.includes(id)} onChange={e=>Edit({...edit,exercises:e.target.checked?[...edit.exercises,id]:edit.exercises.filter(x=>x!==id)})}/>{name}</label>)}</fieldset>
+    <fieldset><legend className="mb-2">Exercises</legend>{Object.entries(catalog).map(([id,name])=><label key={id} className="flex min-h-10 items-center gap-2"><input type="checkbox" checked={edit.exercises.includes(id)} onChange={e=>{const targets={...edit.targets};if(e.target.checked)targets[id]={...defaultTarget};else delete targets[id];Edit({...edit,targets,exercises:e.target.checked?[...edit.exercises,id]:edit.exercises.filter(x=>x!==id)});}}/>{name}</label>)}</fieldset>
+    {edit.exercises.map(id=><fieldset key={id} className="grid grid-cols-3 gap-2"><legend className="mb-2 font-bold">{title(id)} targets</legend>
+     {([["sets","Sets",1,20],["reps","Reps",1,300],["restSeconds","Rest (sec)",0,900]] as const).map(([field,label,min,max])=><label className="grid gap-1 text-sm" key={field}>{label}<input required type="number" min={min} max={max} step="1" value={Number.isNaN(edit.targets?.[id]?.[field])?"":edit.targets?.[id]?.[field]??defaultTarget[field]} onChange={e=>Edit({...edit,targets:{...edit.targets,[id]:{...(edit.targets?.[id]??defaultTarget),[field]:e.target.valueAsNumber}}})}/></label>)}
+    </fieldset>)}
     <div className="flex gap-2"><Button disabled={busy||!online||!edit.exercises.length}>Save plan</Button><Button type="button" variant="ghost" disabled={busy} onClick={()=>Edit(null)}>Cancel</Button></div></form>}
   </div>}
   {screen==="Progress"&&<div className="grid gap-4 sm:grid-cols-2"><section className={box}><h2 className="mb-4 text-xl font-black">Top set by session</h2><label className="grid gap-1">Exercise<select value={trend} onChange={e=>Trend(e.target.value)}>{Object.entries(catalog).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
