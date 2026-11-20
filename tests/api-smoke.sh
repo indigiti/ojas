@@ -88,4 +88,6 @@ put_weight() {
 curl -fsS -b "$tmp/c1" "$url/progress" | jq -e '.bodyweight==[{date:"2024-02-29",kg:71.8}]'
 curl -fsS -b "$tmp/c1" "$url/export" | jq -e '.bodyweight[0].kg==71.8'
 curl -fsS -b "$tmp/c2" "$url/progress" | jq -e '.bodyweight==[]'
+curl -fsS -b "$tmp/c1" "$url/exercises" | jq -e '.exercises as $names | (.library | length==36) and (.library | all(to_entries[]; .value.name==$names[.key] and (.value.muscles|length>0))) and .library["goblet-squat"].equipment=="Dumbbell"'
+curl -fsS -b "$tmp/c1" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' -d '{"name":"Catalog test","exercises":["goblet-squat"]}' "$url/routines" | jq -e '.routine.exercises==["goblet-squat"]'
 echo "API smoke checks passed"
