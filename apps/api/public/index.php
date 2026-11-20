@@ -216,7 +216,7 @@ try {
         });
         respond(200,['schedule'=>$d['schedule']]);
     }
-    if ($method==='GET' && $path==='/exercises') respond(200,['exercises'=>$catalog]);
+    if ($method==='GET' && $path==='/exercises') respond(200,['exercises'=>$catalog,'library'=>require __DIR__.'/../exercise-library.php']);
     if ($method==='GET' && $path==='/routines') respond(200,['routines'=>array_merge($starters,array_values($userStore()['routines'] ?? []))]);
     if (($method==='POST' && $path==='/routines') || ($method==='PATCH' && preg_match('~^/routines/([a-f0-9]{32})$~D',$path,$match))) {
         $new=routine(body(),$catalog);

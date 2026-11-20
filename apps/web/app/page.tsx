@@ -2,8 +2,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { get, set, del } from "idb-keyval";
 import { Activity, ArrowRight, CalendarDays, Dumbbell, ListChecks, LogOut, Timer } from "lucide-react";
-import { recordKey, isWeightRecord, volume, estimatedMax, platesPerSide, nextLoad, weeklyWeightChange } from "@/lib/training.mjs";
+import { recordKey, isWeightRecord, volume, estimatedMax, platesPerSide, nextLoad, weeklyWeightChange, muscleWorkouts } from "@/lib/training.mjs";
 import { ScheduleEditor, type Schedule } from "@/components/schedule-editor";
+import { ExerciseLibrary, type Exercise } from "@/components/exercise-library";
 import { Button } from "@/components/ui/button";
 
 type WeighIn={date:string;kg:number};
@@ -37,6 +38,7 @@ const err=(e:unknown)=>e instanceof Error?e.message:"Something went wrong";
 const fmt=(x:string)=>new Date(x).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric",timeZone:"UTC"});
 export default function Page(){
  const [session,S]=useState<Session|null>(null), [screen,screenTo]=useState<Screen>("Today");
+ const [library,Library]=useState<Record<string,Exercise>>({});
  const [catalog,C]=useState<Record<string,string>>({}), [plans,P]=useState<Plan[]>([]), [history,H]=useState<Workout[]>([]);
  const [draft,D]=useState<Draft|null>(null), [selected,Sel]=useState("starter"), [exercise,E]=useState(""), [trend,Trend]=useState("");
  const [edit,Edit]=useState<Plan|null>(null), [busy,B]=useState(false), [notice,N]=useState(""), [online,On]=useState(true), [now,Now]=useState(0);
@@ -55,8 +57,8 @@ export default function Page(){
  const key="ojas:draft:"+uid;
  const title=(id:string)=>catalog[id]||id;
  async function refresh(){
-  const [c,p,h,s]=await Promise.all([api<{exercises:Record<string,string>}>("/exercises"),api<{routines:Plan[]}>("/routines"),api<{workouts:Workout[];bodyweight:WeighIn[]}>("/progress"),api<{schedule:Schedule|null}>("/schedule")]);
-  ScheduleState(s.schedule);C(c.exercises);P(p.routines);H(h.workouts);WeighIns(h.bodyweight??[]);Trend(t=>t||Object.keys(c.exercises)[0]||"");
+  const [c,p,h,s]=await Promise.all([api<{exercises:Record<string,string>;library:Record<string,Exercise>}>("/exercises"),api<{routines:Plan[]}>("/routines"),api<{workouts:Workout[];bodyweight:WeighIn[]}>("/progress"),api<{schedule:Schedule|null}>("/schedule")]);
+  ScheduleState(s.schedule);C(c.exercises);Library(c.library??{});P(p.routines);H(h.workouts);WeighIns(h.bodyweight??[]);Trend(t=>t||Object.keys(c.exercises)[0]||"");
  }
  useEffect(()=>{api<Session>("/me").then(S).catch(e=>N(err(e))).finally(()=>R(true));
   const check=()=>On(navigator.onLine);check();window.addEventListener("online",check);window.addEventListener("offline",check);
@@ -95,7 +97,7 @@ export default function Page(){
  function demo(){void action(async()=>{
   const s=await api<Session>("/me");S(await api<Session>("/auth/demo","POST",{},s.csrf));screenTo("Today");
  });}
- function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);if(session.user?.demo)void del(key).catch(()=>{});S(null);D(null);ScheduleState(null);Override(false);Correct(null);SetEditing(null);Removed(null);P([]);H([]);WeighIns([]);WeighKg("");WeighDate("");C({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
+ function logout(){void action(async()=>{if(!session)return;await api("/auth/logout","POST",undefined,session.csrf);if(session.user?.demo)void del(key).catch(()=>{});S(null);D(null);ScheduleState(null);Override(false);Correct(null);SetEditing(null);Removed(null);P([]);H([]);WeighIns([]);WeighKg("");WeighDate("");C({});Library({});Edit(null);Sel("starter");Trend("");E("");K("");Reps("");Safe(false);S(await api<Session>("/me"));});}
  function savePlan(e:FormEvent){e.preventDefault();if(!edit||!session)return;void action(async()=>{
   const {routine}=await api<{routine:Plan}>(edit.id?"/routines/"+edit.id:"/routines",edit.id?"PATCH":"POST",{...edit,targets:Object.fromEntries(edit.exercises.map(id=>[id,edit.targets?.[id]??defaultTarget]))},session.csrf);
   P(p=>p.some(x=>x.id===routine.id)?p.map(x=>x.id===routine.id?routine:x):[...p,routine]);Sel(routine.id);Edit(null);
@@ -137,6 +139,7 @@ export default function Page(){
    const link=document.createElement("a");link.href=url;link.download="ojas-training.json";link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   });
  }
+ const muscleSummary=now?muscleWorkouts(history,library,now-7*86400000):[];
  const activeTarget=draft?.plan.targets?.[exercise];
  const suggestion=nextLoad(history,exercise,activeTarget);
  const weightChange=weeklyWeightChange(weighIns);
@@ -206,11 +209,15 @@ export default function Page(){
    {!draft.pending&&<Button variant="outline" disabled={busy} onClick={()=>{if(window.confirm("Discard this workout and its unsaved sets?"))void action(async()=>{await del(key);D(null);screenTo("Today");});}}>Discard</Button>}</div>
   </section>:<section className={box}><p className="mb-4">No active workout.</p><Button onClick={()=>screenTo("Today")}>Go to Today</Button></section>)}
   {screen==="Plans"&&<div className="grid gap-4 sm:grid-cols-2">
+   {!edit&&<ExerciseLibrary library={library}/>}
    <ScheduleEditor key={schedule?.id??"manual"} schedule={schedule} plans={plans} disabled={busy||!online} onSave={saveSchedule}/>
    <section className={box}><h2 className="mb-3 text-xl font-black">Routines</h2>{plans.map(p=><div key={p.id} className="border-b border-white/10 py-3"><p className="font-bold">{p.name}{plan?.id===p.id?" · Selected":""}</p><p className="mb-2 text-sm text-neutral-400">{p.exercises.map(title).join(" · ")}</p><div className="flex gap-2"><Button variant="outline" onClick={()=>{Sel(p.id);Override(true);screenTo("Today");}}>Use plan</Button>{!p.id.startsWith("starter")&&<Button variant="ghost" onClick={()=>Edit(p)}>Edit</Button>}</div></div>)}
    <Button className="mt-4" onClick={()=>Edit({id:"",name:"",exercises:[]})}>New plan</Button></section>
    {edit&&<form className={box+" grid gap-3"} onSubmit={savePlan}><h2 className="text-xl font-black">{edit.id?"Edit plan":"New plan"}</h2><label className="grid gap-1">Plan name<input required maxLength={100} value={edit.name} onChange={e=>Edit({...edit,name:e.target.value})}/></label>
-    <fieldset><legend className="mb-2">Exercises</legend>{Object.entries(catalog).map(([id,name])=><label key={id} className="flex min-h-10 items-center gap-2"><input type="checkbox" checked={edit.exercises.includes(id)} onChange={e=>{const targets={...edit.targets};if(e.target.checked)targets[id]={...defaultTarget};else delete targets[id];Edit({...edit,targets,exercises:e.target.checked?[...edit.exercises,id]:edit.exercises.filter(x=>x!==id)});}}/>{name}</label>)}</fieldset>
+    <ExerciseLibrary library={library} selected={edit.exercises} onToggle={id=>{const targets={...edit.targets};const checked=edit.exercises.includes(id);
+     if(checked)delete targets[id];else targets[id]={...defaultTarget};
+     Edit({...edit,targets,exercises:checked?edit.exercises.filter(x=>x!==id):[...edit.exercises,id]});
+    }}/>
     {edit.exercises.map(id=><fieldset key={id} className="grid grid-cols-3 gap-2"><legend className="mb-2 font-bold">{title(id)} targets</legend>
      {([["sets","Sets",1,20],["reps","Reps",1,300],["restSeconds","Rest (sec)",0,900]] as const).map(([field,label,min,max])=><label className="grid gap-1 text-sm" key={field}>{label}<input required type="number" min={min} max={max} step="1" value={Number.isNaN(edit.targets?.[id]?.[field])?"":edit.targets?.[id]?.[field]??defaultTarget[field]} onChange={e=>Edit({...edit,targets:{...edit.targets,[id]:{...(edit.targets?.[id]??defaultTarget),[field]:e.target.valueAsNumber}}})}/></label>)}
     </fieldset>)}
@@ -220,6 +227,10 @@ export default function Page(){
    {bestEstimate>0&&<p className="mt-3 text-sm">Estimated 1RM: {bestEstimate.toFixed(1)} kg · Epley, 1–10 reps</p>}
    {personalBest&&<p className="mt-3 text-sm text-lime-300">Heaviest logged set: {personalBest.kg} kg × {personalBest.reps}</p>}
    {points.length?<ol className="mt-4 grid gap-3">{points.map(p=><li key={p.id}><div className="flex justify-between text-sm"><span>{fmt(p.date)}</span><span>{p.top.kg} kg × {p.top.reps}</span></div><div className="mt-1 h-2 rounded-full bg-neutral-700"><div aria-hidden className="h-2 rounded-full bg-lime-300" style={{width:(p.top.kg/max*100)+"%"}}/></div></li>)}</ol>:<p className="mt-4 text-neutral-400">No logged sets for this exercise.</p>}</section>
+   <section className={box}><h2 className="mb-2 text-xl font-black">Muscle workload · last 7 days</h2>
+   <p className="mb-3 text-sm text-neutral-400">Working and drop sets count toward the catalog’s primary muscle only. External load × reps does not include body weight. Last trained is not a recovery estimate.</p>
+   {muscleSummary.length?<ul className="divide-y divide-white/10">{muscleSummary.map(x=><li key={x.muscle} className="py-2"><p className="font-bold">{x.muscle} · {x.sets} sets</p><p className="text-sm text-neutral-400">{x.kgReps.toLocaleString(undefined,{maximumFractionDigits:2})} kg·reps · Last trained {fmt(new Date(x.last).toISOString())}</p></li>)}</ul>:<p className="text-sm text-neutral-400">No qualifying sets in the last seven days.</p>}
+   </section>
    <section className={box}><h2 className="mb-4 text-xl font-black">Body weight</h2>
    <form className="grid gap-3" onSubmit={saveWeight}>
     <label className="grid gap-1">Date (UTC)<input type="date" required min="1900-01-01" max={now?new Date(now).toISOString().slice(0,10):undefined} value={weightDate} onChange={e=>WeighDate(e.target.value)}/></label>
